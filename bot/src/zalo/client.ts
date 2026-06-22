@@ -318,3 +318,57 @@ export async function fetchChatHistory(
 
   return out;
 }
+
+// ---- Mutating group calls (operator only) ----
+
+/**
+ * Gửi text message vào group. Chỉ dùng cho cảnh báo ngày 25 bằng tài khoản operator.
+ * Shape sendMessage của zca-js đã đổi vài lần, nên wrapper thử 2 dạng phổ biến.
+ */
+export async function sendGroupText(api: ZaloApi, groupId: string, text: string): Promise<void> {
+  if (typeof api.sendMessage !== "function") {
+    throw new Error("zca-js runtime không có api.sendMessage");
+  }
+
+  try {
+    await api.sendMessage({ msg: text }, groupId, 1);
+    return;
+  } catch {
+    await api.sendMessage(text, groupId, 1);
+  }
+}
+
+/**
+ * Xoá 1 member khỏi group. zca-js bản đang cài không expose type definition cho method
+ * này, nhưng các runtime/fork thường có một trong các tên dưới. Nếu không có, dừng rõ
+ * để user không tưởng bot đã xoá thành công.
+ */
+export async function removeGroupMember(api: ZaloApi, groupId: string, memberId: string): Promise<void> {
+  const candidates = [
+    "removeUserFromGroup",
+    "removeMemberFromGroup",
+    "removeGroupMember",
+    "kickMemberFromGroup",
+  ];
+
+  for (const name of candidates) {
+    const fn = api?.[name];
+    if (typeof fn !== "function") continue;
+    try {
+      await fn.call(api, memberId, groupId);
+      return;
+    } catch (firstError) {
+      try {
+        await fn.call(api, groupId, memberId);
+        return;
+      } catch {
+        throw firstError;
+      }
+    }
+  }
+
+  throw new Error(
+    "zca-js runtime không có method xoá member được hỗ trợ " +
+      `(đã thử: ${candidates.join(", ")})`,
+  );
+}
