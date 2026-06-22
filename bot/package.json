@@ -1,0 +1,27 @@
+{
+  "name": "bot-member-zalo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot quét tương tác group Zalo & dọn bớt thành viên ít hoạt động định kỳ (Milestone 1: thu thập dữ liệu)",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts start",
+    "init-seed": "tsx src/index.ts init-seed",
+    "export-members": "tsx src/index.ts export-members",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "dotenv": "^16.4.7",
+    "zca-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
