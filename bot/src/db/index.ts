@@ -409,24 +409,28 @@ export function deleteBotState(key: string): void {
 }
 
 /**
- * Khóa chống chạy chồng (atomic). Trả true nếu giành được khóa, false nếu đã có khóa
- * còn hiệu lực. Dùng INSERT (PK conflict = đã khóa). Khóa cũ hơn staleMs coi như chết
- * (process trước crash) → cho phép chiếm lại.
+ * Khóa chống chạy chồng (ATOMIC). Trả true nếu giành được khóa, false nếu đã có khóa
+ * còn hiệu lực. Khóa cũ hơn staleMs coi như chết (process trước crash) → cho phép chiếm lại.
+ *
+ * Phải atomic vì `telegram-poll` chạy cron MỖI PHÚT còn 1 batch kick kéo dài tới ~100 phút
+ * (50 người × 2 phút) → nhiều tiến trình chạy CHỒNG nhau. Read-then-write (2 statement) bị
+ * TOCTOU: 2 process cùng SELECT thấy trống rồi cùng INSERT → cả hai tưởng thắng → KICK CHỒNG.
+ * Gộp check-and-set vào 1 statement: INSERT ... ON CONFLICT DO UPDATE chỉ ghi đè khi khóa cũ
+ * đã stale (WHERE), nếu khóa còn tươi thì UPDATE thành no-op (changes=0 = thua). SQLite ghi
+ * tuần tự từng statement nên 1 trong 2 process chắc chắn changes=0.
  */
 export function acquireLock(key: string, now: number, staleMs: number): boolean {
-  const db = getDb();
-  const existing = db.prepare(`SELECT value FROM bot_state WHERE key = @key`).get({ key }) as
-    | { value: string }
-    | undefined;
-  if (existing) {
-    const lockedAt = Number(existing.value);
-    if (Number.isFinite(lockedAt) && now - lockedAt < staleMs) return false;
-  }
-  db.prepare(
-    `INSERT INTO bot_state (key, value, updated_at) VALUES (@key, @now, @now)
-     ON CONFLICT(key) DO UPDATE SET value = @now, updated_at = @now`,
-  ).run({ key, now });
-  return true;
+  const res = getDb()
+    .prepare(
+      `INSERT INTO bot_state (key, value, updated_at) VALUES (@key, @now, @now)
+       ON CONFLICT(key) DO UPDATE SET value = @now, updated_at = @now
+       WHERE CAST(bot_state.value AS INTEGER) <= 0
+          OR @now - CAST(bot_state.value AS INTEGER) >= @staleMs`,
+    )
+    .run({ key, now, staleMs });
+  // changes=1: INSERT mới / chiếm lại khóa stale / khóa giá trị hỏng (<=0) → an toàn không kẹt vĩnh viễn.
+  // changes=0: khóa còn tươi → thua.
+  return res.changes > 0;
 }
 
 export function releaseLock(key: string): void {
