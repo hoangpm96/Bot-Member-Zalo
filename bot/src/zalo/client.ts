@@ -154,37 +154,78 @@ export interface GroupSnapshot {
   members: GroupMemberLite[];
 }
 
+/** Suy role từ creatorId/adminIds của group. */
+function roleOf(id: string, creatorId: string, adminIds: string[]): GroupMemberLite["role"] {
+  if (id && id === creatorId) return "owner";
+  if (id && adminIds.includes(id)) return "admin";
+  return "member";
+}
+
 /**
- * Lấy snapshot thành viên group + phân loại role (owner/admin/member).
- * READ-ONLY. Dùng getGroupInfo (có currentMems + creatorId + adminIds).
+ * Lấy snapshot thành viên group + phân loại role (owner/admin/member). READ-ONLY.
+ *
+ * Với nhóm/community lớn (đã verify trên group thật 998 người), getGroupInfo trả
+ * `currentMems`/`memberIds` RỖNG nhưng có `memVerList` = ["<id>_<ver>", ...] đủ mọi
+ * thành viên. Nên: tách id từ memVerList → getGroupMembersInfo theo lô (throttle) để
+ * lấy tên. Role ghép từ creatorId + adminIds của getGroupInfo (profile không có role).
+ * Fallback currentMems nếu phiên bản/nhóm nhỏ có sẵn.
  */
-export async function getGroupSnapshot(api: ZaloApi, groupId: string): Promise<GroupSnapshot> {
+export async function getGroupSnapshot(
+  api: ZaloApi,
+  groupId: string,
+  throttleMs = config.zaloThrottleMs,
+): Promise<GroupSnapshot> {
   const info = await api.getGroupInfo(groupId);
-  // getGroupInfo trả gridInfoMap[groupId] hoặc trực tiếp tuỳ phiên bản — xử lý cả 2.
   const g = info?.gridInfoMap?.[groupId] ?? info?.[groupId] ?? info;
 
   const creatorId: string = g?.creatorId ?? "";
   const adminIds: string[] = Array.isArray(g?.adminIds) ? g.adminIds : [];
+  const name = String(g?.name ?? "");
+  const totalMember = Number(g?.totalMember ?? 0);
+
+  // Đường nhanh: nếu currentMems có sẵn (nhóm nhỏ) → dùng luôn.
   const currentMems: any[] = Array.isArray(g?.currentMems) ? g.currentMems : [];
+  if (currentMems.length > 0) {
+    const members = currentMems.map((m) => {
+      const id = String(m?.id ?? "");
+      return { id, displayName: String(m?.dName ?? m?.zaloName ?? ""), role: roleOf(id, creatorId, adminIds) };
+    });
+    return { groupId, name, totalMember: totalMember || members.length, members };
+  }
 
-  const members: GroupMemberLite[] = currentMems.map((m) => {
-    const id = String(m?.id ?? "");
-    let role: GroupMemberLite["role"] = "member";
-    if (id && id === creatorId) role = "owner";
-    else if (id && adminIds.includes(id)) role = "admin";
-    return {
-      id,
-      displayName: String(m?.dName ?? m?.zaloName ?? ""),
-      role,
-    };
-  });
+  // Nhóm lớn: tách id từ memVerList ("<id>_<ver>") rồi lấy profile theo lô.
+  const memVerList: string[] = Array.isArray(g?.memVerList) ? g.memVerList : [];
+  const ids: string[] = memVerList
+    .map((x) => String(x).split("_")[0] ?? "")
+    .filter((id) => id !== "");
+  if (ids.length === 0) {
+    return { groupId, name, totalMember, members: [] };
+  }
 
-  return {
-    groupId,
-    name: String(g?.name ?? ""),
-    totalMember: Number(g?.totalMember ?? members.length),
-    members,
-  };
+  const members: GroupMemberLite[] = [];
+  const BATCH = 50;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    let resp: any;
+    try {
+      resp = await api.getGroupMembersInfo(batch);
+    } catch (e) {
+      console.warn(`[zalo] getGroupMembersInfo lỗi ở lô ${i / BATCH}: ${String(e)}`);
+      continue;
+    }
+    const profiles = resp?.profiles ?? {};
+    for (const id of batch) {
+      const p = profiles[id];
+      members.push({
+        id,
+        displayName: String(p?.displayName ?? p?.zaloName ?? ""),
+        role: roleOf(id, creatorId, adminIds),
+      });
+    }
+    if (i + BATCH < ids.length) await sleep(throttleMs);
+  }
+
+  return { groupId, name, totalMember: totalMember || members.length, members };
 }
 
 export interface GroupBrief {
@@ -254,7 +295,15 @@ export async function fetchChatHistory(
   try {
     resp = await api.getGroupChatHistory(groupId, count);
   } catch (e) {
-    console.warn(`[seed] getGroupChatHistory lỗi, bỏ qua seed: ${String(e)}`);
+    const msg = String(e);
+    // 404 thường gặp với Community lớn — Zalo không cho kéo lịch sử chat qua API này.
+    // KHÔNG phải lỗi nghiêm trọng: bỏ qua seed, dựa vào giai đoạn làm nóng (OQ-5 đã lường).
+    if (msg.includes("404")) {
+      console.warn("[seed] getGroupChatHistory không khả dụng cho nhóm này (404) — bỏ qua seed chat. " +
+        "Dữ liệu sẽ thu thập dần qua listener trong giai đoạn làm nóng. Đây là điều bình thường với Community.");
+    } else {
+      console.warn(`[seed] getGroupChatHistory lỗi, bỏ qua seed: ${msg}`);
+    }
     return out;
   }
 
