@@ -49,7 +49,16 @@ npm run init-seed       # quét QR (acc chính) → đọc member + seed lịch 
 npm start               # chạy listener (acc phụ) → bắt đầu thu thập + đếm 30 ngày làm nóng
 ```
 
-**Đăng nhập = quét QR.** Bot không có giao diện. Lần đầu mỗi tài khoản, lệnh sẽ tạo file ảnh QR ở `data/qr-owner.png` (acc chính) hoặc `data/qr-operator.png` (acc phụ) và **dừng chờ** — mở ảnh đó, quét bằng app Zalo trên điện thoại. Quét xong, session lưu ở `data/session-*.json` (đã gitignore) để lần sau khỏi quét lại.
+**Đăng nhập = quét QR.** Bot không có giao diện. Lần đầu mỗi tài khoản, lệnh sẽ **in mã QR thẳng ra terminal** (dạng ASCII) và **dừng chờ** — quét trực tiếp bằng app Zalo trên điện thoại, kể cả khi đang SSH vào VPS (không cần màn hình). Đồng thời cũng lưu một bản ảnh ở `data/qr-{owner,operator}.png` để dùng nếu thích. Quét xong, session lưu ở `data/session-*.json` (đã gitignore) để lần sau khỏi quét lại.
+
+### Login một lần, chạy mãi trên VPS
+
+Session **tái dùng được**: đã login ở đâu thì có thể mang file session sang nơi khác chạy mà không cần quét lại.
+
+- Cách 1 (khuyến nghị cho VPS): SSH vào VPS, chạy lệnh → QR hiện ngay trong terminal → quét bằng điện thoại.
+- Cách 2: login trên máy có màn hình rồi `scp data/session-*.json user@vps:đường-dẫn/bot/data/`. Bot trên VPS dùng session sẵn có, không cần QR.
+
+QR chỉ xuất hiện lại khi session hết hạn.
 
 ## Vận hành trên VPS (rẻ)
 

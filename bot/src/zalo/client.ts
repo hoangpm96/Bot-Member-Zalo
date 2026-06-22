@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { Zalo, LoginQRCallbackEventType } from "zca-js";
+import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
 
 /**
@@ -95,14 +96,19 @@ export async function login(kind: SessionKind): Promise<ZaloApi> {
   const api = await zalo.loginQR({ qrPath }, (event: any) => {
     switch (event?.type) {
       case LoginQRCallbackEventType.QRCodeGenerated: {
+        // 1) In QR thẳng ra terminal (ASCII) — quét trực tiếp trên SSH/VPS, không cần mở file.
+        const code = event?.data?.code;
+        if (code) {
+          console.log(`\n[zalo] 📱 QUÉT MÃ QR DƯỚI ĐÂY BẰNG APP ZALO (tài khoản ${kind}):\n`);
+          qrcodeTerminal.generate(code, { small: true });
+          console.log("");
+        }
+        // 2) Đồng thời lưu ra file ảnh (tiện khi chạy trên máy có màn hình).
         const save = event?.actions?.saveToFile;
         if (typeof save === "function") {
           Promise.resolve(save(qrPath))
-            .then(() => {
-              console.log(`\n[zalo] 📱 MỞ FILE NÀY VÀ QUÉT BẰNG APP ZALO (tài khoản ${kind}):`);
-              console.log(`        ${path.resolve(qrPath)}\n`);
-            })
-            .catch((e) => console.warn(`[zalo] Không lưu được QR: ${String(e)}`));
+            .then(() => console.log(`[zalo] (Hoặc mở ảnh QR: ${path.resolve(qrPath)})\n`))
+            .catch(() => {});
         }
         break;
       }
