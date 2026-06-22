@@ -6,15 +6,21 @@ import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmu
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Listener chạy LIÊN TỤC (keep-alive trên VPS). Ghi nhận tương tác real-time:
- *  - message   → interaction type 'message'
- *  - reaction  → interaction type 'reaction'
+ * Listener chạy LIÊN TỤC (keep-alive trên VPS). Ghi nhận tương tác:
+ *  - message       → interaction 'message' (real-time)
+ *  - reaction      → interaction 'reaction' (real-time)
+ *  - old_messages  → interaction 'message' source 'seed' (đồng bộ lịch sử GẦN ĐÂY lúc kết nối)
+ *  - old_reactions → interaction 'reaction' source 'seed' (đồng bộ lịch sử GẦN ĐÂY)
  *  - group_event join/leave/remove → cập nhật members
  *
- * Voting KHÔNG bắt được qua listener (GroupEventType của zca-js không có poll/vote —
- * đã verify từ source; xem OQ-1). Listener chỉ tính message + reaction.
+ * old_messages/old_reactions: zca-js bắn batch lịch sử gần đây khi listener vừa kết nối
+ * (cache phiên Zalo Web). Đây là cách DUY NHẤT lấy được chút dữ liệu quá khứ cho Community
+ * (getGroupChatHistory bị 404). Kéo về bao xa tuỳ Zalo (thường vài giờ–vài ngày), không
+ * đảm bảo đầy đủ — giai đoạn làm nóng vẫn là phương án chính. Dedupe lo trùng.
  *
- * Dùng tài khoản PHỤ (operator). KHÔNG kick/gửi gì ở Milestone 1.
+ * Voting KHÔNG bắt được qua listener (GroupEventType không có poll/vote — OQ-1).
+ *
+ * Dùng tài khoản PHỤ (operator). KHÔNG kick/gửi gì.
  */
 
 const SESSION: SessionKind = "operator";
@@ -63,14 +69,25 @@ export async function runListener(): Promise<void> {
   const api = await login(SESSION);
   await syncMembersOnce(api, now);
 
+  /** Ghi 1 tương tác (message/reaction). source 'seed' cho batch lịch sử cũ. */
+  function record(
+    payload: any,
+    type: "message" | "reaction",
+    source: "listener" | "seed",
+  ): void {
+    if (!isTargetThread(payload?.threadId ?? payload?.data?.idTo)) return;
+    const sender = extractSender(payload);
+    if (!sender) return;
+    const ts = extractTs(payload, Date.now());
+    if (type === "message") {
+      upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
+    }
+    logInteraction({ zaloUserId: sender, type, ts, source });
+  }
+
   api.listener.on("message", (msg: any) => {
     try {
-      if (!isTargetThread(msg?.threadId ?? msg?.data?.idTo)) return;
-      const sender = extractSender(msg);
-      if (!sender) return;
-      const ts = extractTs(msg, Date.now());
-      upsertMember({ zaloUserId: sender, displayName: String(msg?.data?.dName ?? ""), now: Date.now() });
-      logInteraction({ zaloUserId: sender, type: "message", ts, source: "listener" });
+      record(msg, "message", "listener");
     } catch (e) {
       console.warn(`[listener] lỗi xử lý message: ${String(e)}`);
     }
@@ -78,13 +95,38 @@ export async function runListener(): Promise<void> {
 
   api.listener.on("reaction", (rc: any) => {
     try {
-      if (!isTargetThread(rc?.threadId ?? rc?.data?.idTo)) return;
-      const sender = extractSender(rc);
-      if (!sender) return;
-      const ts = extractTs(rc, Date.now());
-      logInteraction({ zaloUserId: sender, type: "reaction", ts, source: "listener" });
+      record(rc, "reaction", "listener");
     } catch (e) {
       console.warn(`[listener] lỗi xử lý reaction: ${String(e)}`);
+    }
+  });
+
+  // Batch lịch sử gần đây zca-js đồng bộ lúc kết nối → seed dữ liệu quá khứ (best-effort).
+  api.listener.on("old_messages", (msgs: any) => {
+    try {
+      const arr = Array.isArray(msgs) ? msgs : [msgs];
+      let n = 0;
+      for (const m of arr) {
+        record(m, "message", "seed");
+        n += 1;
+      }
+      if (n > 0) console.log(`[listener] Nhận ${n} tin nhắn lịch sử (old_messages) → seed.`);
+    } catch (e) {
+      console.warn(`[listener] lỗi xử lý old_messages: ${String(e)}`);
+    }
+  });
+
+  api.listener.on("old_reactions", (rcs: any) => {
+    try {
+      const arr = Array.isArray(rcs) ? rcs : [rcs];
+      let n = 0;
+      for (const r of arr) {
+        record(r, "reaction", "seed");
+        n += 1;
+      }
+      if (n > 0) console.log(`[listener] Nhận ${n} reaction lịch sử (old_reactions) → seed.`);
+    } catch (e) {
+      console.warn(`[listener] lỗi xử lý old_reactions: ${String(e)}`);
     }
   });
 
@@ -110,7 +152,9 @@ export async function runListener(): Promise<void> {
   });
 
   api.listener.start();
-  console.log("[listener] Đang lắng nghe (message + reaction + group_event). Ctrl+C để dừng.");
+  console.log(
+    "[listener] Đang lắng nghe (message + reaction + old_messages/old_reactions + group_event). Ctrl+C để dừng.",
+  );
 }
 
 /** Chuẩn hoá danh sách member trong 1 group_event (shape chưa verify → phòng thủ). */
