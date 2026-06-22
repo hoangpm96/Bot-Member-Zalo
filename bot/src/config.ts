@@ -36,10 +36,8 @@ export const config = {
 
   /** Thư mục lưu session đăng nhập Zalo. */
   sessionDir,
-  /** Session tài khoản phụ (vận hành: listener). */
-  operatorSessionPath: path.join(sessionDir, "session-operator.json"),
-  /** Session tài khoản chính (chỉ init-seed, read-only). */
-  ownerSessionPath: path.join(sessionDir, "session-owner.json"),
+  /** Session tài khoản co-admin (dùng cho mọi lệnh). */
+  sessionPath: path.join(sessionDir, "session.json"),
 
   /** Số ngày làm nóng trước khi được phép kick (brainstorm: 30). */
   warmupDays: readInt("WARMUP_DAYS", 30),
@@ -50,10 +48,26 @@ export const config = {
   /** Nghỉ giữa mỗi lần gọi Zalo nặng (ms) — chống flag. */
   zaloThrottleMs: readInt("ZALO_THROTTLE_MS", 1500),
 
-  /** init-seed: số tháng lịch sử chat tối đa kéo về (0 = tối đa tới trần). */
-  seedMaxMonths: readInt("SEED_MAX_MONTHS", 0),
-  /** init-seed: trần số trang lịch sử chat (chặn vòng lặp / tránh flag). */
-  seedMaxPages: readInt("SEED_MAX_PAGES", 200),
+  /** Trần số member xoá trong một kỳ cleanup (brainstorm: 50). */
+  maxKicksPerRun: readInt("MAX_KICKS_PER_RUN", 50),
+
+  /** Nghỉ giữa mỗi lần kick thật (brainstorm: 2 phút). */
+  kickThrottleMs: readInt("KICK_THROTTLE_MS", 120_000),
+
+  /** File JSON danh sách trắng: [{"id":"...", "note":"..."}] hoặc ["id"]. */
+  vipListPath: process.env.VIP_LIST_PATH?.trim() || "./data/vip-list.json",
+
+  /** Cho phép command cleanup-warn gửi cảnh báo vào group. DRY_RUN=1 vẫn chặn gửi. */
+  sendGroupWarnings: readBool("SEND_GROUP_WARNINGS", false),
+
+  /** Telegram bot token để duyệt cleanup. Rỗng = fallback CLI/dry-run. */
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || "",
+
+  /** Telegram chat id admin nhận approval/report. */
+  telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || "",
+
+  /** Timeout chờ duyệt cleanup qua Telegram (brainstorm: 48h). */
+  approvalTimeoutHours: readInt("APPROVAL_TIMEOUT_HOURS", 48),
 } as const;
 
 export type AppConfig = typeof config;

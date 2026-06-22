@@ -3,12 +3,11 @@ import { login, listGroups } from "../zalo/client.js";
 
 /**
  * list-groups — liệt kê các group tài khoản đang tham gia + ID, để copy GROUP_ID vào .env.
- * Đăng nhập bằng tài khoản CHÍNH (owner) — đằng nào cũng dùng cho init-seed sau đó.
- * READ-ONLY: chỉ gọi getAllGroups + getGroupInfo. Không gửi/không kick.
+ * Dùng tài khoản co-admin (như mọi lệnh khác). READ-ONLY: chỉ getAllGroups + getGroupInfo.
  */
 export async function runListGroups(): Promise<void> {
-  console.log("[list-groups] Đăng nhập (owner) để liệt kê group. Quét QR nếu chưa có session.");
-  const api = await login("owner");
+  console.log("[list-groups] Đăng nhập (co-admin) để liệt kê group. Quét QR nếu chưa có session.");
+  const api = await login();
 
   const groups = await listGroups(api, config.zaloThrottleMs);
   if (groups.length === 0) {

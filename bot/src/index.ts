@@ -1,24 +1,28 @@
 import { runListener } from "./listener.js";
-import { runInitSeed } from "./commands/init-seed.js";
 import { runExportMembers } from "./commands/export-members.js";
 import { runListGroups } from "./commands/list-groups.js";
+import { runCleanupWarn, runMonthlyCleanup, runTelegramPoll } from "./commands/monthly-cleanup.js";
 
 /**
  * Entrypoint. Chọn lệnh qua arg đầu tiên:
  *   start          → chạy listener keep-alive (tài khoản phụ). Ghi tương tác real-time.
- *   init-seed      → khởi tạo DB lần đầu bằng tài khoản chính (CHỈ ĐỌC).
  *   export-members → xuất danh sách member ra CSV để tra ID cho VIP list.
+ *   cleanup-warn   → cảnh báo group ngày 25 (dry-run mặc định).
+ *   monthly-cleanup → lập kế hoạch/kick định kỳ (dry-run mặc định).
+ *   telegram-poll  → xử lý Telegram approval/cancel/retry/timeout.
  *
- * Milestone 2 sẽ thêm: monthly-cleanup (xếp hạng + cảnh báo + duyệt Telegram + kick).
+ * Milestone 2 hiện có lõi xếp hạng + cảnh báo + kick dry-run/real qua CLI.
  */
 
-const USAGE = `Bot-Member-Zalo (Milestone 1)
+const USAGE = `Bot-Member-Zalo
 
 Cách dùng:
-  npm run list-groups       # liệt kê group + ID (đăng nhập acc chính) — lấy GROUP_ID cho .env
-  npm start                 # chạy listener (tài khoản phụ) — ghi tương tác liên tục
-  npm run init-seed         # khởi tạo DB bằng tài khoản chính (CHỈ ĐỌC, 1 lần lúc setup)
+  npm run list-groups       # liệt kê group + ID (tài khoản co-admin) — lấy GROUP_ID cho .env
+  npm start                 # chạy listener (tài khoản co-admin) — ghi tương tác liên tục
   npm run export-members    # xuất danh sách member ra CSV (tra ID cho VIP list)
+  npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
+  npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
+  npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
 `;
 
 async function main(): Promise<void> {
@@ -31,11 +35,17 @@ async function main(): Promise<void> {
     case "list-groups":
       await runListGroups();
       break;
-    case "init-seed":
-      await runInitSeed();
-      break;
     case "export-members":
       runExportMembers();
+      break;
+    case "cleanup-warn":
+      await runCleanupWarn();
+      break;
+    case "monthly-cleanup":
+      await runMonthlyCleanup();
+      break;
+    case "telegram-poll":
+      await runTelegramPoll();
       break;
     default:
       console.log(USAGE);

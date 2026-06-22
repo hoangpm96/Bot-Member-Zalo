@@ -12,6 +12,9 @@
     "list-groups": "tsx src/index.ts list-groups",
     "init-seed": "tsx src/index.ts init-seed",
     "export-members": "tsx src/index.ts export-members",
+    "cleanup-warn": "tsx src/index.ts cleanup-warn",
+    "monthly-cleanup": "tsx src/index.ts monthly-cleanup",
+    "telegram-poll": "tsx src/index.ts telegram-poll",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

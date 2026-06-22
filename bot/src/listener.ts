@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { login, getGroupSnapshot, normalizeTs, type SessionKind } from "./zalo/client.js";
+import { login, getGroupSnapshot, normalizeTs } from "./zalo/client.js";
 import { logInteraction, upsertMember, markMemberLeft } from "./db/index.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
 
@@ -18,10 +18,8 @@ import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmu
  *
  * Voting KHÔNG bắt được qua listener (GroupEventType không có poll/vote — OQ-1).
  *
- * Dùng tài khoản PHỤ (operator). KHÔNG kick/gửi gì.
+ * Dùng tài khoản co-admin. KHÔNG kick/gửi gì ở listener.
  */
-
-const SESSION: SessionKind = "operator";
 
 /** Chỉ ghi tương tác cho group ta quản lý (bỏ qua DM / group khác). */
 function isTargetThread(threadId: unknown): boolean {
@@ -64,7 +62,7 @@ export async function runListener(): Promise<void> {
       `còn ${warmupDaysRemaining(now)} ngày (mốc bắt đầu: ${new Date(startedAt).toISOString()}).`,
   );
 
-  const api = await login(SESSION);
+  const api = await login();
   await syncMembersOnce(api, now);
 
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
