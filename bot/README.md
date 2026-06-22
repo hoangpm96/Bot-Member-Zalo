@@ -30,12 +30,26 @@ Yêu cầu: Node >= 20.
 
 | Lệnh | Tài khoản | Mô tả |
 |------|-----------|-------|
+| `npm run list-groups` | **chính** (owner) | Liệt kê group đang tham gia + ID. Dùng để lấy `GROUP_ID` cho `.env`. Chỉ đọc. |
 | `npm start` | **phụ** (operator) | Chạy listener keep-alive — ghi tương tác liên tục. Lệnh chính chạy 24/7. |
 | `npm run init-seed` | **chính** (owner) | Khởi tạo DB lần đầu: đọc member + seed lịch sử chat. **CHỈ ĐỌC**, không gửi/không kick. Chạy 1 lần. |
 | `npm run export-members` | — | Xuất `data/members-export.csv` (tra ID cho VIP list). Chỉ đọc DB. |
 | `npm run typecheck` | — | `tsc --noEmit`. |
 
-Lần chạy đầu mỗi tài khoản sẽ hiện QR (lưu ở `data/qr-operator.png` / `data/qr-owner.png`) để quét bằng app Zalo. Session lưu ở `data/session-*.json` (đã gitignore).
+### Quy trình setup lần đầu (theo thứ tự)
+
+```bash
+npm install
+cp .env.example .env
+
+npm run list-groups     # quét QR (acc chính) → in danh sách group + ID
+# → copy GROUP_ID nhóm cần quản lý dán vào .env
+
+npm run init-seed       # quét QR (acc chính) → đọc member + seed lịch sử chat vào DB
+npm start               # chạy listener (acc phụ) → bắt đầu thu thập + đếm 30 ngày làm nóng
+```
+
+**Đăng nhập = quét QR.** Bot không có giao diện. Lần đầu mỗi tài khoản, lệnh sẽ tạo file ảnh QR ở `data/qr-owner.png` (acc chính) hoặc `data/qr-operator.png` (acc phụ) và **dừng chờ** — mở ảnh đó, quét bằng app Zalo trên điện thoại. Quét xong, session lưu ở `data/session-*.json` (đã gitignore) để lần sau khỏi quét lại.
 
 ## Vận hành trên VPS (rẻ)
 

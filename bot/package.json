@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "tsx src/index.ts start",
+    "list-groups": "tsx src/index.ts list-groups",
     "init-seed": "tsx src/index.ts init-seed",
     "export-members": "tsx src/index.ts export-members",
     "typecheck": "tsc --noEmit"

@@ -25,8 +25,8 @@ import { upsertMember, logInteraction, countActiveMembers } from "../db/index.js
 export async function runInitSeed(): Promise<void> {
   if (!config.groupId) {
     console.error(
-      "[init-seed] Cần đặt GROUP_ID trong .env trước. Nếu chưa biết, chạy `npm run export-members` " +
-        "bằng tài khoản phụ để dò group id, hoặc xem log đăng nhập.",
+      "[init-seed] Chưa có GROUP_ID trong .env. Chạy `npm run list-groups` trước để lấy ID nhóm, " +
+        "copy vào .env (dòng GROUP_ID=...), rồi chạy lại lệnh này.",
     );
     process.exitCode = 1;
     return;

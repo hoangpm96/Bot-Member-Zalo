@@ -154,6 +154,49 @@ export async function getGroupSnapshot(api: ZaloApi, groupId: string): Promise<G
   };
 }
 
+export interface GroupBrief {
+  groupId: string;
+  name: string;
+  totalMember: number;
+}
+
+/**
+ * Liệt kê các group tài khoản đang tham gia (READ-ONLY). Dùng để tra GROUP_ID lúc setup.
+ * getAllGroups() chỉ trả về danh sách ID (gridVerMap), nên gọi tiếp getGroupInfo() cho
+ * các ID đó để lấy tên + số thành viên.
+ */
+export async function listGroups(api: ZaloApi, throttleMs: number): Promise<GroupBrief[]> {
+  const all = await api.getAllGroups();
+  const ids: string[] = Object.keys(all?.gridVerMap ?? {});
+  if (ids.length === 0) return [];
+
+  const out: GroupBrief[] = [];
+  // getGroupInfo nhận mảng ID; lấy theo lô nhỏ + throttle để tránh flag.
+  const BATCH = 20;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const batch = ids.slice(i, i + BATCH);
+    let info: any;
+    try {
+      info = await api.getGroupInfo(batch);
+    } catch (e) {
+      console.warn(`[list-groups] getGroupInfo lỗi ở lô ${i / BATCH}: ${String(e)}`);
+      continue;
+    }
+    const map = info?.gridInfoMap ?? info ?? {};
+    for (const id of batch) {
+      const g = map?.[id];
+      if (!g) continue;
+      out.push({
+        groupId: id,
+        name: String(g?.name ?? "(không tên)"),
+        totalMember: Number(g?.totalMember ?? 0),
+      });
+    }
+    if (i + BATCH < ids.length) await sleep(throttleMs);
+  }
+  return out;
+}
+
 /**
  * Kéo lịch sử chat group (READ-ONLY) cho init-seed.
  * Trả về mảng {senderId, ts} đã chuẩn hoá (ts = epoch ms). Lọc theo sinceTs nếu có.
