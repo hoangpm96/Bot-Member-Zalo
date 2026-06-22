@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Zalo } from "zca-js";
+import { Zalo, LoginQRCallbackEventType } from "zca-js";
 import { config } from "../config.js";
 
 /**
@@ -86,22 +86,49 @@ export async function login(kind: SessionKind): Promise<ZaloApi> {
     }
   }
 
-  console.log(`[zalo] Quét QR để đăng nhập (${kind}). QR lưu tại data/qr-${kind}.png`);
-  const api = await zalo.loginQR(
-    { qrPath: path.join(config.sessionDir, `qr-${kind}.png`) },
-    (event: any) => {
-      // Khi nhận được thông tin đăng nhập → lưu để lần sau tái dùng.
-      const data = event?.data;
-      if (data?.cookie && data?.imei && data?.userAgent) {
-        saveCredentials(kind, {
-          cookie: data.cookie,
-          imei: data.imei,
-          userAgent: data.userAgent,
-        });
-        console.log(`[zalo] Đã lưu session (${kind}).`);
+  const qrPath = path.join(config.sessionDir, `qr-${kind}.png`);
+  fs.mkdirSync(config.sessionDir, { recursive: true });
+  console.log(`[zalo] Đăng nhập (${kind}) — đang tạo mã QR...`);
+
+  // QUAN TRỌNG: khi truyền callback, zca-js KHÔNG tự lưu file QR — phải tự gọi
+  // event.actions.saveToFile() ở event QRCodeGenerated, nếu không sẽ không có ảnh QR.
+  const api = await zalo.loginQR({ qrPath }, (event: any) => {
+    switch (event?.type) {
+      case LoginQRCallbackEventType.QRCodeGenerated: {
+        const save = event?.actions?.saveToFile;
+        if (typeof save === "function") {
+          Promise.resolve(save(qrPath))
+            .then(() => {
+              console.log(`\n[zalo] 📱 MỞ FILE NÀY VÀ QUÉT BẰNG APP ZALO (tài khoản ${kind}):`);
+              console.log(`        ${path.resolve(qrPath)}\n`);
+            })
+            .catch((e) => console.warn(`[zalo] Không lưu được QR: ${String(e)}`));
+        }
+        break;
       }
-    },
-  );
+      case LoginQRCallbackEventType.QRCodeScanned:
+        console.log(`[zalo] ✅ Đã quét QR (${event?.data?.display_name ?? ""}). Đang hoàn tất...`);
+        break;
+      case LoginQRCallbackEventType.QRCodeExpired:
+        console.warn("[zalo] ⚠️  Mã QR hết hạn — đang tạo mã mới...");
+        break;
+      case LoginQRCallbackEventType.QRCodeDeclined:
+        console.warn("[zalo] ❌ Đăng nhập bị từ chối trên điện thoại.");
+        break;
+      case LoginQRCallbackEventType.GotLoginInfo: {
+        const data = event?.data;
+        if (data?.cookie && data?.imei && data?.userAgent) {
+          saveCredentials(kind, {
+            cookie: data.cookie,
+            imei: data.imei,
+            userAgent: data.userAgent,
+          });
+          console.log(`[zalo] 💾 Đã lưu session (${kind}) — lần sau khỏi quét lại.`);
+        }
+        break;
+      }
+    }
+  });
   return api;
 }
 
