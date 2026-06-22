@@ -338,7 +338,7 @@ export async function fetchGroupPollVotes(
 // ---- Mutating group calls (co-admin) ----
 
 /**
- * Gửi text message vào group. Chỉ dùng cho cảnh báo ngày 25 bằng tài khoản operator.
+ * Gửi text message vào group. Chỉ dùng cho cảnh báo ngày 25 (tài khoản co-admin).
  * Shape sendMessage của zca-js đã đổi vài lần, nên wrapper thử 2 dạng phổ biến.
  */
 export async function sendGroupText(api: ZaloApi, groupId: string, text: string): Promise<void> {

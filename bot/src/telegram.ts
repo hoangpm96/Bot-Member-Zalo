@@ -17,7 +17,7 @@ function isConfigured(): boolean {
   return config.telegramBotToken !== "" && config.telegramChatId !== "";
 }
 
-export function assertTelegramConfigured(): void {
+function assertTelegramConfigured(): void {
   if (!isConfigured()) {
     throw new Error("Thiếu TELEGRAM_BOT_TOKEN hoặc TELEGRAM_CHAT_ID trong .env");
   }

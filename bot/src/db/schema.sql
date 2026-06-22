@@ -1,4 +1,4 @@
--- Schema Bot-Member-Zalo (Milestone 1). Toàn bộ idempotent (CREATE IF NOT EXISTS).
+-- Schema Bot-Member-Zalo. Toàn bộ idempotent (CREATE IF NOT EXISTS).
 -- Chạy qua db.exec() mỗi lần khởi động. Timestamp = epoch milliseconds (INTEGER).
 
 -- Thành viên group. zalo_user_id là khoá nghiệp vụ (id nội bộ Zalo, không đổi).

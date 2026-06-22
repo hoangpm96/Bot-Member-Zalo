@@ -25,7 +25,7 @@ function readBool(name: string, fallback: boolean): boolean {
 const sessionDir = process.env.SESSION_DIR?.trim() || "./data";
 
 export const config = {
-  /** ID group Zalo cần quản lý. Rỗng ở Milestone 1 đầu (lấy được qua export-members). */
+  /** ID group Zalo cần quản lý. Lấy bằng lệnh `list-groups`. */
   groupId: process.env.GROUP_ID?.trim() || "",
 
   /** Số thành viên muốn giữ lại sau mỗi kỳ (brainstorm: 965). */

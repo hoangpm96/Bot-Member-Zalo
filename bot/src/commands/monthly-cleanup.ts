@@ -21,7 +21,6 @@ import {
   setBotState,
   upsertCleanupWarning,
   upsertMember,
-  type CleanupPlanItemRow,
   type MemberStats,
   type ScanRunRow,
 } from "../db/index.js";

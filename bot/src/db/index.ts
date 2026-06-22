@@ -249,12 +249,6 @@ export function finishScanRun(input: {
     });
 }
 
-export function getLatestScanRun(): ScanRunRow | undefined {
-  return getDb()
-    .prepare(`SELECT * FROM scan_runs ORDER BY id DESC LIMIT 1`)
-    .get() as ScanRunRow | undefined;
-}
-
 export function getScanRun(id: number): ScanRunRow | undefined {
   return getDb()
     .prepare(`SELECT * FROM scan_runs WHERE id = @id`)

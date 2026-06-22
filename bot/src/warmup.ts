@@ -7,8 +7,8 @@ import { getBotState, setBotState } from "./db/index.js";
  *  - Kỳ dọn dẹp đầu tiên (tháng đầu) bỏ qua kick hoàn toàn.
  * Trạng thái lưu trong bảng bot_state (key-value) để bền qua restart.
  *
- * Milestone 1 chỉ THIẾT LẬP + đọc trạng thái này (listener gọi ensureWarmupStarted).
- * Milestone 2 (job kick) sẽ gọi isWarmupComplete() / markFirstCycleSkipped() để quyết định.
+ * Listener gọi ensureWarmupStarted lúc khởi động; job kick gọi isWarmupComplete() /
+ * markFirstCycleSkipped() để quyết định có được kick chưa.
  */
 
 const KEY_WARMUP_STARTED_AT = "warmup_started_at";
@@ -22,7 +22,7 @@ export function ensureWarmupStarted(now: number): number {
   return now;
 }
 
-export function getWarmupStartedAt(): number | null {
+function getWarmupStartedAt(): number | null {
   const v = getBotState(KEY_WARMUP_STARTED_AT);
   return v ? Number(v) : null;
 }
