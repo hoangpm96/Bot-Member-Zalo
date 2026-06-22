@@ -1,5 +1,5 @@
-import { config } from "./config.js";
 import { getBotState, setBotState } from "./db/index.js";
+import { runtimeConfig } from "./runtime-config.js";
 
 /**
  * Quản lý "giai đoạn làm nóng" (brainstorm Mục 4 + 7.2):
@@ -38,12 +38,12 @@ export function daysCollected(now: number): number {
 
 /** Đã đủ WARMUP_DAYS chưa? (điều kiện cần để kick — M2 dùng) */
 export function isWarmupComplete(now: number): boolean {
-  return daysCollected(now) >= config.warmupDays;
+  return daysCollected(now) >= runtimeConfig.warmupDays;
 }
 
 /** Số ngày còn lại của giai đoạn làm nóng (>= 0). */
 export function warmupDaysRemaining(now: number): number {
-  return Math.max(0, config.warmupDays - daysCollected(now));
+  return Math.max(0, runtimeConfig.warmupDays - daysCollected(now));
 }
 
 /** Kỳ dọn dẹp đầu tiên đã được bỏ qua chưa? (M2 dùng) */

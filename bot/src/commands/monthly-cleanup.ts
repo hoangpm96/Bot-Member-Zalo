@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
+import { runtimeConfig } from "../runtime-config.js";
 import {
   acquireLock,
   countActiveMembers,
@@ -139,14 +140,14 @@ export async function runCleanupWarn(): Promise<void> {
   const runId = createScanRun({
     startedAt: now,
     status: "warned",
-    targetCount: config.targetMemberCount,
+    targetCount: runtimeConfig.targetMemberCount,
     memberCount,
     plannedKicks: 0,
     actualKicks: 0,
     note: "monthly warning",
   });
 
-  if (memberCount <= config.targetMemberCount) {
+  if (memberCount <= runtimeConfig.targetMemberCount) {
     finishScanRun({
       id: runId,
       finishedAt: Date.now(),
@@ -154,7 +155,7 @@ export async function runCleanupWarn(): Promise<void> {
       memberCount,
       plannedKicks: 0,
       actualKicks: 0,
-      note: `Nhóm đang có ${memberCount} thành viên (<= ${config.targetMemberCount}), bỏ cảnh báo.`,
+      note: `Nhóm đang có ${memberCount} thành viên (<= ${runtimeConfig.targetMemberCount}), bỏ cảnh báo.`,
     });
     console.log(`[cleanup-warn] Nhóm có ${memberCount} thành viên, không gửi cảnh báo.`);
     return;
@@ -200,7 +201,7 @@ export async function runMonthlyCleanup(): Promise<void> {
   const runId = createScanRun({
     startedAt: now,
     status: "collecting",
-    targetCount: config.targetMemberCount,
+    targetCount: runtimeConfig.targetMemberCount,
     memberCount,
     plannedKicks: 0,
     actualKicks: 0,
@@ -223,8 +224,8 @@ export async function runMonthlyCleanup(): Promise<void> {
     return;
   }
 
-  if (memberCount <= config.targetMemberCount) {
-    const note = `Nhóm đang có ${memberCount} thành viên (<= ${config.targetMemberCount}), không cần dọn.`;
+  if (memberCount <= runtimeConfig.targetMemberCount) {
+    const note = `Nhóm đang có ${memberCount} thành viên (<= ${runtimeConfig.targetMemberCount}), không cần dọn.`;
     finishScanRun({ id: runId, finishedAt: Date.now(), status: "skipped", memberCount, note });
     console.log(`[monthly-cleanup] ${note}`);
     await maybeSendTelegram(`ℹ️ ${note}`);
@@ -233,7 +234,7 @@ export async function runMonthlyCleanup(): Promise<void> {
 
   const vipIds = loadVipIds();
   const candidates = buildCandidates(getMemberStats(), vipIds, now);
-  const needToRemove = Math.min(memberCount - config.targetMemberCount, config.maxKicksPerRun);
+  const needToRemove = Math.min(memberCount - runtimeConfig.targetMemberCount, runtimeConfig.maxKicksPerRun);
   const top = candidates.slice(0, needToRemove);
   const grace: CleanupCandidate[] = [];
   const plan: CleanupCandidate[] = [];
@@ -269,7 +270,7 @@ export async function runMonthlyCleanup(): Promise<void> {
   });
 
   console.log(
-    `[monthly-cleanup] Group=${memberCount}, target=${config.targetMemberCount}, ` +
+    `[monthly-cleanup] Group=${memberCount}, target=${runtimeConfig.targetMemberCount}, ` +
       `cần=${needToRemove}, ân hạn=${grace.length}, sẽ xoá=${plan.length}, VIP=${vipIds.size}.`,
   );
   printList("Ân hạn kỳ này", grace);
@@ -359,7 +360,7 @@ export async function runTelegramPoll(): Promise<void> {
   const pending = getLatestScanRunByStatus(["pending_approval"]);
   if (pending && isApprovalTimedOut(pending, now)) {
     await sendTelegramText(
-      `⏰ Kỳ dọn dẹp #${pending.id} quá ${config.approvalTimeoutHours}h chưa phản hồi, tự động tiến hành.`,
+      `⏰ Kỳ dọn dẹp #${pending.id} quá ${runtimeConfig.approvalTimeoutHours}h chưa phản hồi, tự động tiến hành.`,
     );
     await executeScanRun(pending.id, "telegram-timeout");
   }
@@ -430,7 +431,7 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
         console.log(`[monthly-cleanup] Đã xoá ${actual}/${rows.length}: ${c.display_name} (${c.zalo_user_id})`);
         // Giữ lock "tươi" trong lúc kick dài để không bị coi là stale.
         setBotState(KICK_LOCK_KEY, String(Date.now()), Date.now());
-        if (actual < rows.length) await sleep(config.kickThrottleMs);
+        if (actual < rows.length) await sleep(runtimeConfig.kickThrottleMs);
       }
     } catch (e) {
       const failed = rows[actual];
@@ -499,10 +500,10 @@ function buildApprovalText(
     .join("\n");
   return (
     `📋 Kỳ dọn dẹp #${scanRunId}: dự kiến xoá ${plan.length} thành viên ít hoạt động nhất ` +
-    `để đưa nhóm về ${config.targetMemberCount}.\n` +
+    `để đưa nhóm về ${runtimeConfig.targetMemberCount}.\n` +
     `Hiện có: ${memberCount}. Ân hạn kỳ này: ${graceCount}.\n` +
     `Bấm Duyệt để tiến hành, Huỷ để bỏ qua. Không phản hồi trong ` +
-    `${config.approvalTimeoutHours}h sẽ tự động tiến hành.\n\n${rows}`
+    `${runtimeConfig.approvalTimeoutHours}h sẽ tự động tiến hành.\n\n${rows}`
   );
 }
 
@@ -512,7 +513,7 @@ function approvalSentKey(scanRunId: number): string {
 }
 
 function isApprovalTimedOut(run: ScanRunRow, now: number): boolean {
-  const timeoutMs = config.approvalTimeoutHours * 60 * 60 * 1000;
+  const timeoutMs = runtimeConfig.approvalTimeoutHours * 60 * 60 * 1000;
   const sentRaw = getBotState(approvalSentKey(run.id));
   // Mốc bắt đầu đếm timeout = lúc gửi duyệt; fallback started_at nếu thiếu (an toàn).
   const baseline = sentRaw && Number.isFinite(Number(sentRaw)) ? Number(sentRaw) : run.started_at;

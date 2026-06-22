@@ -21,6 +21,9 @@ zalo-session*.json
 # Build output
 dist/
 build/
+.next/
+next-env.d.ts
+*.tsbuildinfo
 
 # Logs
 *.log
