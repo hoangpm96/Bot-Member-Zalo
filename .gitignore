@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Secrets & config — TUYỆT ĐỐI không commit
+.env
+.env.*
+!.env.example
+
+# Zalo session/cookie — lộ ra = mất tài khoản
+data/
+*.session.json
+zalo-session*.json
+
+# SQLite database (data tích luỹ trên VPS, không versioned)
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Build output
+dist/
+build/
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
