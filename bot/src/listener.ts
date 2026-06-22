@@ -1,6 +1,6 @@
 import { config } from "./config.js";
-import { login, getGroupSnapshot, normalizeTs } from "./zalo/client.js";
-import { logInteraction, upsertMember, markMemberLeft } from "./db/index.js";
+import { login, getGroupSnapshot, normalizeTs, fetchGroupPollVotes } from "./zalo/client.js";
+import { logInteraction, upsertMember, markMemberLeft, getMember } from "./db/index.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -116,6 +116,30 @@ export async function runListener(): Promise<void> {
 
   api.listener.start();
   console.log("[listener] Đang lắng nghe (message + reaction + group_event). Ctrl+C để dừng.");
+
+  // Đọc vote trong poll định kỳ (mỗi 6h) — vote không đến qua event, phải chủ động đọc.
+  // Đọc được cả vote cũ (poll lưu trạng thái server). Dedupe lo trùng.
+  const SYNC_VOTES_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  async function syncVotesOnce(): Promise<void> {
+    if (!config.groupId) return;
+    try {
+      const votes = await fetchGroupPollVotes(api, config.groupId, {
+        maxPages: 50,
+        throttleMs: config.zaloThrottleMs,
+      });
+      let written = 0;
+      for (const v of votes) {
+        if (!getMember(v.voterId)) continue;
+        logInteraction({ zaloUserId: v.voterId, type: "vote", ts: v.ts, source: "poll" });
+        written += 1;
+      }
+      if (written > 0) console.log(`[listener] Đồng bộ vote từ poll: ghi ${written} lượt.`);
+    } catch (e) {
+      console.warn(`[listener] sync vote lỗi: ${String(e)}`);
+    }
+  }
+  await syncVotesOnce(); // chạy 1 lần ngay khi start
+  setInterval(() => void syncVotesOnce(), SYNC_VOTES_INTERVAL_MS);
 }
 
 /** Chuẩn hoá danh sách member trong 1 group_event (shape chưa verify → phòng thủ). */

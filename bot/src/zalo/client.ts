@@ -264,9 +264,76 @@ export async function listGroups(api: ZaloApi, throttleMs: number): Promise<Grou
   return out;
 }
 
-// Ghi chú: KHÔNG có hàm kéo lịch sử chat. getGroupChatHistory trả 404 với Zalo Community
-// và không có API nào khác lấy được tương tác quá khứ (đã verify + review độc lập). Dữ
-// liệu tương tác chỉ tích luỹ từ lúc listener chạy (giai đoạn làm nóng).
+// Ghi chú: KHÔNG có hàm kéo lịch sử CHAT/REACTION quá khứ — getGroupChatHistory trả 404
+// với Zalo Community, không có API nào khác (đã verify). Nhưng VOTE thì đọc được: poll lưu
+// trạng thái trên server (xem fetchGroupPollVotes), nên lấy được cả voter cũ lẫn mới.
+
+export interface PollVote {
+  voterId: string;
+  ts: number;
+  pollId: number;
+}
+
+/**
+ * Đọc danh sách người đã vote trong mọi poll đang có của group (READ-ONLY).
+ * getListBoard(groupId) liệt kê board item (note/pinned/poll); item poll (boardType=3)
+ * có data.options[].voters[] = ID người vote. Đọc được cả vote CŨ vì poll lưu trạng thái
+ * trên server (khác chat/reaction).
+ *
+ * ⚠️ Giới hạn (verify khi chạy thật): poll ẩn danh (is_anonymous) → voters có thể rỗng;
+ * poll đã hết hạn/xoá → không còn trong board; phân trang qua page/count.
+ * ts dùng updated_time của poll (không có mốc vote từng người) — đủ cho "có tương tác".
+ */
+export async function fetchGroupPollVotes(
+  api: ZaloApi,
+  groupId: string,
+  opts: { maxPages: number; throttleMs: number },
+): Promise<PollVote[]> {
+  const POLL_BOARD_TYPE = 3;
+  const out: PollVote[] = [];
+  let anonymousSkipped = 0;
+
+  for (let page = 1; page <= opts.maxPages; page += 1) {
+    let resp: any;
+    try {
+      resp = await api.getListBoard({ page, count: 20 }, groupId);
+    } catch (e) {
+      console.warn(`[votes] getListBoard lỗi ở trang ${page}: ${String(e)}`);
+      break;
+    }
+
+    const items: any[] = resp?.items ?? [];
+    if (items.length === 0) break;
+
+    for (const it of items) {
+      if (Number(it?.boardType) !== POLL_BOARD_TYPE) continue;
+      const poll = it?.data;
+      if (!poll) continue;
+      if (poll?.is_anonymous) {
+        anonymousSkipped += 1;
+        continue;
+      }
+      const pollId = Number(poll?.poll_id ?? 0);
+      const ts = normalizeTs(poll?.updated_time ?? poll?.created_time) ?? Date.now();
+      const options: any[] = Array.isArray(poll?.options) ? poll.options : [];
+      for (const op of options) {
+        const voters: any[] = Array.isArray(op?.voters) ? op.voters : [];
+        for (const v of voters) {
+          const voterId = String(v ?? "");
+          if (voterId) out.push({ voterId, ts, pollId });
+        }
+      }
+    }
+
+    if (items.length < 20) break; // trang cuối
+    await sleep(opts.throttleMs);
+  }
+
+  if (anonymousSkipped > 0) {
+    console.log(`[votes] Bỏ qua ${anonymousSkipped} poll ẩn danh (không đọc được voter).`);
+  }
+  return out;
+}
 
 // ---- Mutating group calls (co-admin) ----
 

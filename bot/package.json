@@ -10,8 +10,9 @@
   "scripts": {
     "start": "tsx src/index.ts start",
     "list-groups": "tsx src/index.ts list-groups",
-    "init-seed": "tsx src/index.ts init-seed",
     "export-members": "tsx src/index.ts export-members",
+    "import-interactions": "tsx src/index.ts import-interactions",
+    "sync-votes": "tsx src/index.ts sync-votes",
     "cleanup-warn": "tsx src/index.ts cleanup-warn",
     "monthly-cleanup": "tsx src/index.ts monthly-cleanup",
     "telegram-poll": "tsx src/index.ts telegram-poll",

@@ -19,8 +19,8 @@ CREATE TABLE IF NOT EXISTS members (
 CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active);
 
 -- Log tương tác (append-only). Mỗi event 1 row, KHÔNG update/overwrite.
--- type: 'message' | 'reaction'  (voting KHÔNG bắt được qua listener — xem OQ-1).
--- source: 'listener' (real-time, nguồn duy nhất — Zalo Community không cho lấy lịch sử cũ).
+-- type: 'message' | 'reaction' | 'vote' | 'manual'.
+-- source: 'listener' (real-time) | 'manual' (import CSV/JSON từ poll/vote cũ).
 CREATE TABLE IF NOT EXISTS interactions (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   zalo_user_id   TEXT NOT NULL,

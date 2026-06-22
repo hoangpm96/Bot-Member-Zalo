@@ -2,11 +2,14 @@ import { runListener } from "./listener.js";
 import { runExportMembers } from "./commands/export-members.js";
 import { runListGroups } from "./commands/list-groups.js";
 import { runCleanupWarn, runMonthlyCleanup, runTelegramPoll } from "./commands/monthly-cleanup.js";
+import { runImportInteractions } from "./commands/import-interactions.js";
+import { runSyncVotes } from "./commands/sync-votes.js";
 
 /**
  * Entrypoint. Chọn lệnh qua arg đầu tiên:
  *   start          → chạy listener keep-alive (tài khoản phụ). Ghi tương tác real-time.
  *   export-members → xuất danh sách member ra CSV để tra ID cho VIP list.
+ *   import-interactions → import vote/manual interactions từ CSV/JSON.
  *   cleanup-warn   → cảnh báo group ngày 25 (dry-run mặc định).
  *   monthly-cleanup → lập kế hoạch/kick định kỳ (dry-run mặc định).
  *   telegram-poll  → xử lý Telegram approval/cancel/retry/timeout.
@@ -20,6 +23,8 @@ Cách dùng:
   npm run list-groups       # liệt kê group + ID (tài khoản co-admin) — lấy GROUP_ID cho .env
   npm start                 # chạy listener (tài khoản co-admin) — ghi tương tác liên tục
   npm run export-members    # xuất danh sách member ra CSV (tra ID cho VIP list)
+  npm run import-interactions -- ./data/manual-votes.csv
+  npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
@@ -37,6 +42,12 @@ async function main(): Promise<void> {
       break;
     case "export-members":
       runExportMembers();
+      break;
+    case "import-interactions":
+      runImportInteractions(process.argv[3]);
+      break;
+    case "sync-votes":
+      await runSyncVotes();
       break;
     case "cleanup-warn":
       await runCleanupWarn();

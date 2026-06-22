@@ -133,7 +133,7 @@ QR chỉ xuất hiện lại khi session hết hạn.
 
 ## Ghi chú quan trọng (đã verify từ source zca-js)
 
-- **Voting/bình chọn KHÔNG bắt được real-time** — `GroupEventType` của zca-js không có event poll/vote. P0 chỉ tính tin nhắn + reaction. (OQ-1)
+- **Voting:** không bắt được real-time qua listener, NHƯNG đọc được qua poll API (`getListBoard` → `options[].voters[]`) — cả vote cũ lẫn mới. Lệnh `sync-votes` (listener tự gọi mỗi 6h) ghi vote vào DB. Poll **ẩn danh** không đọc được voter. (OQ-1 resolved)
 - **Ngày join của thành viên cũ** thường **không lấy được** từ `getGroupInfo` (chỉ có `lastUpdateTime`, không phải ngày join). Luật "miễn người mới" chỉ áp chắc cho người join **sau** khi bot online. (OQ-2)
 - **Không lấy được tương tác QUÁ KHỨ** với Zalo Community: `getGroupChatHistory` trả 404, `old_messages` không backfill sâu, không có API nào khác (đã verify + review độc lập). Dữ liệu chỉ tích luỹ từ lúc listener chạy. (OQ-5)
 

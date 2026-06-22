@@ -30,7 +30,7 @@ export function getDb(): Database.Database {
 
 export type MemberRole = "owner" | "admin" | "member";
 export type InteractionType = "message" | "reaction" | "vote" | "manual";
-export type InteractionSource = "listener" | "manual";
+export type InteractionSource = "listener" | "manual" | "poll";
 export type ScanRunStatus =
   | "collecting"
   | "warned"
