@@ -13,18 +13,23 @@ const DB_PATH =
   process.env.WEB_DB_PATH?.trim() ||
   path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
 
+/** Lỗi nhận diện được khi DB của bot chưa tồn tại (cho API trả 503 thân thiện). */
+export class DbNotReadyError extends Error {}
+
 let db: Database.Database | null = null;
 
 export function getDb(): Database.Database {
   if (db) return db;
   if (!fs.existsSync(DB_PATH)) {
-    throw new Error(
+    throw new DbNotReadyError(
       `Không tìm thấy DB của bot tại ${DB_PATH}. Chạy bot (npm start) ít nhất 1 lần, ` +
         `hoặc đặt WEB_DB_PATH trỏ đúng file bot.db.`,
     );
   }
+  // Mở chung file bot đang dùng (WAL). KHÔNG set journal_mode ở đây (bot là chủ).
+  // busy_timeout: chờ tối đa 5s nếu bot đang giữ write-lock thay vì lỗi SQLITE_BUSY ngay.
   db = new Database(DB_PATH);
-  db.pragma("journal_mode = WAL");
+  db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
   return db;
 }

@@ -29,18 +29,30 @@ export function readVip(): VipEntry[] {
   }
 }
 
-/** Ghi VIP list. Trả lỗi (string) nếu vượt 100 hoặc id trùng. */
-export function writeVip(entries: VipEntry[]): string | null {
-  const clean = entries
-    .map((x) => ({ id: String(x.id ?? "").trim(), note: x.note?.trim() || undefined }))
-    .filter((x) => x.id !== "");
-  if (clean.length > 100) return "VIP list tối đa 100 người.";
+/**
+ * Ghi VIP list. Trả lỗi (string) nếu input bậy / vượt 100 / id trùng.
+ * Validate từng entry (phòng input rác như [null]) + ghi ATOMIC (temp rồi rename)
+ * để bot không bao giờ đọc trúng file đang ghi dở.
+ */
+export function writeVip(entries: unknown): string | null {
+  if (!Array.isArray(entries)) return "Danh sách không hợp lệ.";
+
+  const clean: VipEntry[] = [];
   const ids = new Set<string>();
-  for (const e of clean) {
-    if (ids.has(e.id)) return `ID trùng trong danh sách: ${e.id}`;
-    ids.add(e.id);
+  for (const raw of entries) {
+    const item = typeof raw === "string" ? { id: raw } : (raw as { id?: unknown; note?: unknown } | null);
+    const id = String(item?.id ?? "").trim();
+    if (id === "") continue; // bỏ dòng trống
+    if (ids.has(id)) return `ID trùng trong danh sách: ${id}`;
+    ids.add(id);
+    const note = item?.note != null ? String(item.note).trim() : "";
+    clean.push(note ? { id, note } : { id });
   }
+  if (clean.length > 100) return "VIP list tối đa 100 người.";
+
   fs.mkdirSync(path.dirname(VIP_PATH), { recursive: true });
-  fs.writeFileSync(VIP_PATH, JSON.stringify(clean, null, 2) + "\n", "utf8");
+  const tmp = `${VIP_PATH}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(clean, null, 2) + "\n", "utf8");
+  fs.renameSync(tmp, VIP_PATH); // atomic trên cùng filesystem
   return null;
 }

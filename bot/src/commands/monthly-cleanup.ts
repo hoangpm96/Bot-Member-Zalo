@@ -80,7 +80,15 @@ function loadVipIds(): Set<string> {
     fs.writeFileSync(p, "[]\n", "utf8");
     return new Set();
   }
-  const raw = JSON.parse(fs.readFileSync(p, "utf8")) as unknown;
+  // Catch lỗi đọc/parse (vd web đang ghi dở, JSON hỏng) → coi như VIP rỗng + cảnh báo,
+  // KHÔNG crash cả kỳ cleanup. An toàn: thà bỏ sót VIP còn hơn dừng giữa chừng.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch (e) {
+    console.warn(`[monthly-cleanup] Không đọc được VIP list (${String(e)}) — coi như rỗng kỳ này.`);
+    return new Set();
+  }
   const entries: VipEntry[] = Array.isArray(raw)
     ? raw.map((x) => (typeof x === "string" ? { id: x } : (x as VipEntry)))
     : [];

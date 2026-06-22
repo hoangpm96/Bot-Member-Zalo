@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readVip, writeVip, type VipEntry } from "@/lib/vip";
+import { readVip, writeVip } from "@/lib/vip";
 
 export const dynamic = "force-dynamic";
 
@@ -16,10 +16,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Dữ liệu không hợp lệ" }, { status: 400 });
   }
   const entries = (body as { entries?: unknown })?.entries;
-  if (!Array.isArray(entries)) {
-    return NextResponse.json({ error: "Thiếu danh sách entries" }, { status: 400 });
-  }
-  const err = writeVip(entries as VipEntry[]);
+  // writeVip tự validate từng entry (chịu được input bậy như [null]).
+  const err = writeVip(entries);
   if (err) {
     return NextResponse.json({ error: err }, { status: 400 });
   }
