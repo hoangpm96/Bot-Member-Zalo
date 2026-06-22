@@ -2,9 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 import {
+  acquireLock,
   countActiveMembers,
   createScanRun,
   finishScanRun,
+  getBotState,
   getLatestScanRunByStatus,
   getMemberStats,
   getScanRun,
@@ -14,7 +16,9 @@ import {
   markCleanupPlanItemsForRun,
   markMemberLeft,
   recordRemoval,
+  releaseLock,
   saveCleanupPlanItems,
+  setBotState,
   upsertCleanupWarning,
   upsertMember,
   type CleanupPlanItemRow,
@@ -277,17 +281,23 @@ export async function runMonthlyCleanup(): Promise<void> {
     return;
   }
 
-  if (isTelegramEnabled()) {
-    await sendApprovalMessage({
-      scanRunId: runId,
-      text: buildApprovalText(runId, memberCount, plan, grace.length),
-    });
-    console.log("[monthly-cleanup] Đã gửi danh sách duyệt qua Telegram, chờ approve/cancel/timeout.");
+  if (!isTelegramEnabled()) {
+    // BẮT BUỘC có Telegram mới kick: không có duyệt thì KHÔNG kick (an toàn, khớp brainstorm).
+    // Giữ status 'planned' để sau khi cấu hình Telegram + chạy lại sẽ gửi duyệt.
+    console.warn(
+      "[monthly-cleanup] ⚠️ Chưa cấu hình Telegram (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID). " +
+        "KHÔNG kick khi chưa có bước duyệt. Đã lập danh sách (status=planned); cấu hình Telegram rồi chạy lại.",
+    );
     return;
   }
 
-  console.log("[monthly-cleanup] Telegram chưa cấu hình, chạy xoá thật ngay theo CLI.");
-  await executeScanRun(runId, "cli");
+  await sendApprovalMessage({
+    scanRunId: runId,
+    text: buildApprovalText(runId, memberCount, plan, grace.length),
+  });
+  // Mốc gửi duyệt — timeout 48h tính TỪ ĐÂY (không phải lúc tạo scan run).
+  setBotState(approvalSentKey(runId), String(Date.now()), Date.now());
+  console.log("[monthly-cleanup] Đã gửi danh sách duyệt qua Telegram, chờ approve/cancel/timeout.");
 }
 
 export async function runTelegramPoll(): Promise<void> {
@@ -336,7 +346,8 @@ export async function runTelegramPoll(): Promise<void> {
     }
 
     if (u.messageText?.trim() === "/retry") {
-      const failed = getLatestScanRunByStatus(["failed", "kicking"]);
+      // CHỈ retry kỳ 'failed' (KHÔNG đụng 'kicking' đang chạy — tránh kick chồng).
+      const failed = getLatestScanRunByStatus(["failed"]);
       if (!failed) {
         await sendTelegramText("ℹ️ Không có kỳ dọn dẹp lỗi để retry.");
         continue;
@@ -355,89 +366,109 @@ export async function runTelegramPoll(): Promise<void> {
   }
 }
 
+/** Khóa chống 2 tiến trình kick chạy chồng (telegram-poll cron mỗi phút). */
+const KICK_LOCK_KEY = "cleanup_kick_lock";
+/** Lock cũ hơn mức này (ms) coi như process trước đã chết → cho phép chiếm lại.
+ *  Phải > thời gian 1 batch kick: 50 người × 2 phút = 100 phút → đặt 3 giờ cho an toàn. */
+const KICK_LOCK_STALE_MS = 3 * 60 * 60 * 1000;
+
 async function executeScanRun(scanRunId: number, reason: string): Promise<void> {
   const run = getScanRun(scanRunId);
-  if (!run || !["pending_approval", "planned", "failed", "kicking"].includes(run.status)) {
-    await maybeSendTelegram(`ℹ️ Kỳ dọn dẹp #${scanRunId} không ở trạng thái có thể chạy.`);
+  // CHỈ chạy từ trạng thái chưa-kick. Bỏ 'kicking' khỏi danh sách: một kỳ đang kick
+  // KHÔNG được phép execute lại (chống kick chồng). 'failed' để cho /retry.
+  if (!run || !["pending_approval", "planned", "failed"].includes(run.status)) {
+    console.log(`[monthly-cleanup] Kỳ #${scanRunId} status='${run?.status}' — không execute (đang chạy hoặc đã xong).`);
     return;
   }
 
-  const rows = listCleanupPlanItems(scanRunId).filter((x) => x.status !== "removed");
-  if (rows.length === 0) {
+  // Khóa: nếu đã có tiến trình kick khác đang chạy → bỏ qua lần này (cron sẽ thử lại sau).
+  if (!acquireLock(KICK_LOCK_KEY, Date.now(), KICK_LOCK_STALE_MS)) {
+    console.log("[monthly-cleanup] Đang có tiến trình kick khác chạy — bỏ qua lần này (chống kick chồng).");
+    return;
+  }
+
+  try {
+    const rows = listCleanupPlanItems(scanRunId).filter((x) => x.status !== "removed");
+    if (rows.length === 0) {
+      finishScanRun({
+        id: scanRunId,
+        finishedAt: Date.now(),
+        status: "done",
+        actualKicks: 0,
+        note: `Không còn plan item để xoá (${reason}).`,
+      });
+      await maybeSendTelegram("✅ Không còn thành viên nào cần xoá.");
+      return;
+    }
+
+    finishScanRun({
+      id: scanRunId,
+      finishedAt: Date.now(),
+      status: "kicking",
+      plannedKicks: rows.length,
+      note: `Bắt đầu kick (${reason}).`,
+    });
+
+    const api = await login();
+    let actual = 0;
+    const removedNames: string[] = [];
+    try {
+      for (const c of rows) {
+        await removeGroupMember(api, config.groupId, c.zalo_user_id);
+        const removedAt = Date.now();
+        recordRemoval({
+          scanRunId,
+          zaloUserId: c.zalo_user_id,
+          displayName: c.display_name,
+          interactionCount: c.interaction_count,
+          lastInteraction: c.last_interaction,
+          removedAt,
+        });
+        markMemberLeft(c.zalo_user_id, removedAt);
+        markCleanupPlanItem({ id: c.id, status: "removed", now: removedAt });
+        actual += 1;
+        removedNames.push(`${c.display_name || c.zalo_user_id} (${c.interaction_count})`);
+        console.log(`[monthly-cleanup] Đã xoá ${actual}/${rows.length}: ${c.display_name} (${c.zalo_user_id})`);
+        // Giữ lock "tươi" trong lúc kick dài để không bị coi là stale.
+        setBotState(KICK_LOCK_KEY, String(Date.now()), Date.now());
+        if (actual < rows.length) await sleep(config.kickThrottleMs);
+      }
+    } catch (e) {
+      const failed = rows[actual];
+      if (failed) {
+        markCleanupPlanItem({ id: failed.id, status: "failed", error: String(e), now: Date.now() });
+      }
+      const note = `E-cleanup-001: đã xoá ${actual}/${rows.length}, lỗi: ${String(e)}`;
+      finishScanRun({
+        id: scanRunId,
+        finishedAt: Date.now(),
+        status: "failed",
+        memberCount: countActiveMembers(),
+        plannedKicks: rows.length,
+        actualKicks: actual,
+        note,
+      });
+      await maybeSendTelegram(`❌ ${note}\nReply /retry để tiếp tục.`);
+      throw new Error(note);
+    }
+
     finishScanRun({
       id: scanRunId,
       finishedAt: Date.now(),
       status: "done",
-      actualKicks: 0,
-      note: `Không còn plan item để xoá (${reason}).`,
-    });
-    await maybeSendTelegram("✅ Không còn thành viên nào cần xoá.");
-    return;
-  }
-
-  finishScanRun({
-    id: scanRunId,
-    finishedAt: Date.now(),
-    status: "kicking",
-    plannedKicks: rows.length,
-    note: `Bắt đầu kick (${reason}).`,
-  });
-
-  const api = await login();
-  let actual = 0;
-  const removedNames: string[] = [];
-  try {
-    for (const c of rows) {
-      await removeGroupMember(api, config.groupId, c.zalo_user_id);
-      const removedAt = Date.now();
-      recordRemoval({
-        scanRunId,
-        zaloUserId: c.zalo_user_id,
-        displayName: c.display_name,
-        interactionCount: c.interaction_count,
-        lastInteraction: c.last_interaction,
-        removedAt,
-      });
-      markMemberLeft(c.zalo_user_id, removedAt);
-      markCleanupPlanItem({ id: c.id, status: "removed", now: removedAt });
-      actual += 1;
-      removedNames.push(`${c.display_name || c.zalo_user_id} (${c.interaction_count})`);
-      console.log(`[monthly-cleanup] Đã xoá ${actual}/${rows.length}: ${c.display_name} (${c.zalo_user_id})`);
-      if (actual < rows.length) await sleep(config.kickThrottleMs);
-    }
-  } catch (e) {
-    const failed = rows[actual];
-    if (failed) {
-      markCleanupPlanItem({ id: failed.id, status: "failed", error: String(e), now: Date.now() });
-    }
-    const note = `E-cleanup-001: đã xoá ${actual}/${rows.length}, lỗi: ${String(e)}`;
-    finishScanRun({
-      id: scanRunId,
-      finishedAt: Date.now(),
-      status: "failed",
       memberCount: countActiveMembers(),
       plannedKicks: rows.length,
       actualKicks: actual,
-      note,
+      note: `Đã xoá ${actual} thành viên.`,
     });
-    await maybeSendTelegram(`❌ ${note}\nReply /retry để tiếp tục.`);
-    throw new Error(note);
+    console.log(`[monthly-cleanup] Hoàn tất. Đã xoá ${actual} thành viên.`);
+    await maybeSendTelegram(
+      `✅ Đã xoá ${actual} thành viên. Nhóm hiện còn ${countActiveMembers()} thành viên.\n` +
+        removedNames.slice(0, 30).map((x, i) => `${i + 1}. ${x}`).join("\n"),
+    );
+  } finally {
+    releaseLock(KICK_LOCK_KEY);
   }
-
-  finishScanRun({
-    id: scanRunId,
-    finishedAt: Date.now(),
-    status: "done",
-    memberCount: countActiveMembers(),
-    plannedKicks: rows.length,
-    actualKicks: actual,
-    note: `Đã xoá ${actual} thành viên.`,
-  });
-  console.log(`[monthly-cleanup] Hoàn tất. Đã xoá ${actual} thành viên.`);
-  await maybeSendTelegram(
-    `✅ Đã xoá ${actual} thành viên. Nhóm hiện còn ${countActiveMembers()} thành viên.\n` +
-      removedNames.slice(0, 30).map((x, i) => `${i + 1}. ${x}`).join("\n"),
-  );
 }
 
 function printList(title: string, rows: CleanupCandidate[]): void {
@@ -476,9 +507,17 @@ function buildApprovalText(
   );
 }
 
+/** Key lưu mốc gửi duyệt Telegram theo run (để tính timeout từ lúc gửi, không phải lúc tạo run). */
+function approvalSentKey(scanRunId: number): string {
+  return `approval_sent_at:${scanRunId}`;
+}
+
 function isApprovalTimedOut(run: ScanRunRow, now: number): boolean {
   const timeoutMs = config.approvalTimeoutHours * 60 * 60 * 1000;
-  return now - run.started_at >= timeoutMs;
+  const sentRaw = getBotState(approvalSentKey(run.id));
+  // Mốc bắt đầu đếm timeout = lúc gửi duyệt; fallback started_at nếu thiếu (an toàn).
+  const baseline = sentRaw && Number.isFinite(Number(sentRaw)) ? Number(sentRaw) : run.started_at;
+  return now - baseline >= timeoutMs;
 }
 
 async function maybeSendTelegram(text: string): Promise<void> {

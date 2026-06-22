@@ -29,8 +29,8 @@ export function getDb(): Database.Database {
 // ---- Types ----
 
 export type MemberRole = "owner" | "admin" | "member";
-export type InteractionType = "message" | "reaction";
-export type InteractionSource = "listener";
+export type InteractionType = "message" | "reaction" | "vote" | "manual";
+export type InteractionSource = "listener" | "manual";
 export type ScanRunStatus =
   | "collecting"
   | "warned"
@@ -408,4 +408,33 @@ export function setBotState(key: string, value: string, now: number): void {
        ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @now`,
     )
     .run({ key, value, now });
+}
+
+export function deleteBotState(key: string): void {
+  getDb().prepare(`DELETE FROM bot_state WHERE key = @key`).run({ key });
+}
+
+/**
+ * Khóa chống chạy chồng (atomic). Trả true nếu giành được khóa, false nếu đã có khóa
+ * còn hiệu lực. Dùng INSERT (PK conflict = đã khóa). Khóa cũ hơn staleMs coi như chết
+ * (process trước crash) → cho phép chiếm lại.
+ */
+export function acquireLock(key: string, now: number, staleMs: number): boolean {
+  const db = getDb();
+  const existing = db.prepare(`SELECT value FROM bot_state WHERE key = @key`).get({ key }) as
+    | { value: string }
+    | undefined;
+  if (existing) {
+    const lockedAt = Number(existing.value);
+    if (Number.isFinite(lockedAt) && now - lockedAt < staleMs) return false;
+  }
+  db.prepare(
+    `INSERT INTO bot_state (key, value, updated_at) VALUES (@key, @now, @now)
+     ON CONFLICT(key) DO UPDATE SET value = @now, updated_at = @now`,
+  ).run({ key, now });
+  return true;
+}
+
+export function releaseLock(key: string): void {
+  deleteBotState(key);
 }
