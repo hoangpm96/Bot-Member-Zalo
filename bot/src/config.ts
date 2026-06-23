@@ -48,6 +48,12 @@ export const config = {
   /** Nghỉ giữa mỗi lần gọi Zalo nặng (ms) — chống flag. */
   zaloThrottleMs: readInt("ZALO_THROTTLE_MS", 1500),
 
+  /** In heartbeat listener mỗi N ms. 0 = tắt. */
+  listenerHeartbeatMs: readInt("LISTENER_HEARTBEAT_MS", 60_000),
+
+  /** Log mỗi N event message/reaction nhận được. 1 = log từng event, 0 = tắt. */
+  listenerEventLogEvery: readInt("LISTENER_EVENT_LOG_EVERY", 1),
+
   /** Trần số member xoá trong một kỳ cleanup (brainstorm: 50). */
   maxKicksPerRun: readInt("MAX_KICKS_PER_RUN", 50),
 

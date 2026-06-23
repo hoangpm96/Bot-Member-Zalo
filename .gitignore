@@ -29,6 +29,7 @@ next-env.d.ts
 *.log
 logs/
 npm-debug.log*
+screenlog.*
 
 # OS / editor
 .DS_Store

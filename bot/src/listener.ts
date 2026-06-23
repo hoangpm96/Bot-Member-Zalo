@@ -37,6 +37,11 @@ function extractTs(payload: any, now: number): number {
   return normalizeTs(payload?.data?.ts ?? payload?.ts) ?? now;
 }
 
+function fmtTime(ts: number | null): string {
+  if (!ts) return "chưa có";
+  return new Date(ts).toLocaleString("vi-VN", { hour12: false });
+}
+
 async function syncMembersOnce(api: any, now: number): Promise<void> {
   if (!config.groupId) {
     console.log("[listener] GROUP_ID chưa đặt — bỏ qua sync member. Chạy export-members để lấy group id.");
@@ -65,6 +70,12 @@ export async function runListener(): Promise<void> {
   const api = await login();
   await syncMembersOnce(api, now);
 
+  let messageEvents = 0;
+  let reactionEvents = 0;
+  let lastEventAt: number | null = null;
+  let lastEventType: "message" | "reaction" | null = null;
+  let lastEventSender = "";
+
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
   function record(payload: any, type: "message" | "reaction"): void {
     if (!isTargetThread(payload?.threadId ?? payload?.data?.idTo)) return;
@@ -75,6 +86,22 @@ export async function runListener(): Promise<void> {
       upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
     }
     logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+
+    if (type === "message") messageEvents += 1;
+    if (type === "reaction") reactionEvents += 1;
+    lastEventAt = Date.now();
+    lastEventType = type;
+    lastEventSender = sender;
+
+    const totalEvents = messageEvents + reactionEvents;
+    const every = config.listenerEventLogEvery;
+    if (every > 0 && totalEvents % every === 0) {
+      console.log(
+        `[listener] Nhận ${type}: user=${sender}, ` +
+          `event=${totalEvents} (message=${messageEvents}, reaction=${reactionEvents}), ` +
+          `zalo_ts=${fmtTime(ts)}.`,
+      );
+    }
   }
 
   api.listener.on("message", (msg: any) => {
@@ -116,6 +143,17 @@ export async function runListener(): Promise<void> {
 
   api.listener.start();
   console.log("[listener] Đang lắng nghe (message + reaction + group_event). Ctrl+C để dừng.");
+
+  if (config.listenerHeartbeatMs > 0) {
+    setInterval(() => {
+      const totalEvents = messageEvents + reactionEvents;
+      console.log(
+        `[listener] Heartbeat OK: event=${totalEvents} ` +
+          `(message=${messageEvents}, reaction=${reactionEvents}), ` +
+          `last=${lastEventType ?? "chưa có"} user=${lastEventSender || "-"} at=${fmtTime(lastEventAt)}.`,
+      );
+    }, config.listenerHeartbeatMs);
+  }
 
   // Đọc vote trong poll định kỳ (mỗi 6h) — vote không đến qua event, phải chủ động đọc.
   // Đọc được cả vote cũ (poll lưu trạng thái server). Dedupe lo trùng.
