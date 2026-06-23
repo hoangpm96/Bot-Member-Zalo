@@ -78,10 +78,11 @@ Sau đó:
 4. Chạy lại `npm run setup-vps`.
 5. Chạy `pm2 startup` một lần nếu VPS chưa cấu hình PM2 startup.
 
-Nếu port `3000` đã được project khác sử dụng, đặt `WEB_PORT=3010` hoặc một port
-trống khác trong `bot/.env` trước khi chạy setup.
+Dashboard chạy ở `WEB_PORT` (mặc định `5831` trong `.env.example`; để trống = `3000`).
+Đổi sang port trống khác trong `bot/.env` nếu cần, và sửa cấu hình Nginx proxy cho khớp.
 
 Checklist đầy đủ: [bot/VPS_SETUP.md](bot/VPS_SETUP.md).
+Cách hoạt động của từng luồng (kèm ASCII diagram): [DOCUMENTATION.md](DOCUMENTATION.md).
 
 ## An toàn
 

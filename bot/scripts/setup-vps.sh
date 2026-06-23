@@ -46,7 +46,7 @@ fi
 
 echo
 echo "VPS setup complete."
-echo "Dashboard: http://<VPS-IP>:3000/login"
+echo "Dashboard: http://<VPS-IP>:${WEB_PORT:-5831}/login"
 echo "Cron: $cron_status"
 echo
 echo "Next checks:"

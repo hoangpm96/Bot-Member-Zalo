@@ -15,7 +15,7 @@ build và start cả `zalo-bot` lẫn `zalo-web` bằng PM2.
 Mở:
 
 ```text
-http://<VPS-IP>:3000/login
+http://<VPS-IP>:5831/login
 ```
 
 Bấm **Bắt đầu đăng nhập**, quét QR bằng tài khoản Zalo phụ/co-admin rồi xác nhận
@@ -57,11 +57,12 @@ WARMUP_DAYS=30
 ZALO_SELF_LISTEN=1
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
-WEB_PORT=3000
+WEB_PORT=5831
 ```
 
-Nếu VPS đã có ứng dụng dùng port `3000`, đặt `WEB_PORT` thành port còn trống,
-ví dụ `3010`, rồi cấu hình Nginx/Caddy proxy vào port đó.
+`WEB_PORT` mặc định là `3000` nếu để trống; ở đây chốt `5831` để tránh đụng app
+khác trên VPS. Nếu đổi sang số khác thì nhớ sửa cả `.env` lẫn cấu hình
+Nginx/Caddy proxy bên dưới cho khớp.
 
 `DRY_RUN` có thể để `1` trong `.env` để thao tác tay an toàn. Cron do `npm run install-cron` cài sẽ override:
 
@@ -94,6 +95,39 @@ pm2 status
 pm2 logs zalo-bot
 pm2 logs zalo-web
 ```
+
+## 3b. (Tuỳ chọn) Nginx reverse proxy + domain
+
+Bước này chỉ cần khi muốn mở dashboard qua domain (vd `https://bot.example.com`)
+thay vì `http://<VPS-IP>:5831`. Bot/web vẫn chạy bình thường nếu bỏ qua.
+
+Web chỉ lắng nghe `127.0.0.1:5831` (PM2 đặt `PORT=WEB_PORT`). Nginx nhận request
+ngoài rồi proxy vào đúng port đó:
+
+```nginx
+# /etc/nginx/sites-available/bot-zalo
+server {
+    listen 80;
+    server_name bot.example.com;
+
+    location / {
+        proxy_pass         http://127.0.0.1:5831;   # khớp WEB_PORT trong .env
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/bot-zalo /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+# HTTPS (khuyến nghị): sudo certbot --nginx -d bot.example.com
+```
+
+Đổi `WEB_PORT` sang số khác thì sửa luôn `proxy_pass` cho khớp, rồi reload nginx.
 
 ## 4. Cài cron tự động riêng lẻ nếu cần
 
