@@ -37,3 +37,14 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Local planning and AI-agent workspace
+docs/
+_templates/
+.claude/
+.codex/
+.cursor/
+.continue/
+.windsurf/
+.aider*
+CLAUDE.md

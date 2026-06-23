@@ -1,7 +1,13 @@
 const path = require("node:path");
 require("dotenv").config({ path: path.resolve(__dirname, ".env") });
 
-const sessionDir = path.resolve(__dirname, process.env.SESSION_DIR || "data");
+function fromBotDir(value, fallback) {
+  return path.resolve(__dirname, value || fallback);
+}
+
+const sessionDir = fromBotDir(process.env.SESSION_DIR, "data");
+const dbPath = fromBotDir(process.env.SQLITE_DB_PATH, "data/bot.db");
+const vipPath = fromBotDir(process.env.VIP_LIST_PATH, "data/vip-list.json");
 
 module.exports = {
   apps: [
@@ -29,10 +35,11 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: "production",
-        PORT: "3000",
-        // Web đọc QR/status trực tiếp từ runtime data của bot.
-        // Dùng đường dẫn tuyệt đối để không phụ thuộc cwd hay nơi gọi PM2.
+        PORT: process.env.WEB_PORT || "3000",
+        // Web đọc cùng runtime data với bot, không phụ thuộc cwd của Next.js.
         WEB_QR_DIR: sessionDir,
+        WEB_DB_PATH: dbPath,
+        WEB_VIP_PATH: vipPath,
       },
     },
   ],

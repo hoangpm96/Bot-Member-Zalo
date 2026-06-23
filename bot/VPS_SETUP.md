@@ -57,7 +57,11 @@ WARMUP_DAYS=30
 ZALO_SELF_LISTEN=1
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
+WEB_PORT=3000
 ```
+
+Nếu VPS đã có ứng dụng dùng port `3000`, đặt `WEB_PORT` thành port còn trống,
+ví dụ `3010`, rồi cấu hình Nginx/Caddy proxy vào port đó.
 
 `DRY_RUN` có thể để `1` trong `.env` để thao tác tay an toàn. Cron do `npm run install-cron` cài sẽ override:
 
