@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LayoutDashboard, Users, History, Settings } from "lucide-react";
+import { LayoutDashboard, Users, History, Settings, LogIn } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,6 +13,7 @@ const NAV = [
   { href: "/members", label: "Thành viên", icon: Users },
   { href: "/history", label: "Lịch sử dọn", icon: History },
   { href: "/settings", label: "Cấu hình", icon: Settings },
+  { href: "/login", label: "Đăng nhập", icon: LogIn },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
