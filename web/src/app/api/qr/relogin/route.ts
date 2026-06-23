@@ -1,9 +1,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { reloginRequestPath } from "@/lib/login-status";
+import {
+  qrImageExists,
+  readLoginStatus,
+  reloginRequestPath,
+} from "@/lib/login-status";
 
 export const dynamic = "force-dynamic";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export async function POST(request: Request) {
   const origin = request.headers.get("origin");
@@ -31,10 +39,11 @@ export async function POST(request: Request) {
   const requestPath = reloginRequestPath();
   const dir = path.dirname(requestPath);
   const tempPath = `${requestPath}.${process.pid}.tmp`;
+  const requestedAt = Date.now();
 
   try {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tempPath, JSON.stringify({ requestedAt: Date.now() }), {
+    fs.writeFileSync(tempPath, JSON.stringify({ requestedAt }), {
       encoding: "utf8",
       mode: 0o600,
     });
@@ -48,5 +57,34 @@ export async function POST(request: Request) {
     );
   }
 
-  return NextResponse.json({ ok: true });
+  // Chờ bot consume marker và tạo QR. Đây là một POST hữu hạn, không poll GET liên
+  // tục từ browser. Nếu bot/PM2 chưa chạy, trả lỗi rõ thay vì báo thành công giả.
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    await sleep(500);
+    const status = readLoginStatus();
+    if (
+      status.updatedAt !== null &&
+      status.updatedAt >= requestedAt &&
+      (status.state === "waiting_scan" ||
+        status.state === "scanned" ||
+        status.state === "logged_in")
+    ) {
+      return NextResponse.json({
+        ok: true,
+        status: {
+          ...status,
+          hasQr: qrImageExists(),
+        },
+      });
+    }
+  }
+
+  return NextResponse.json(
+    {
+      error:
+        "Bot chưa phản hồi. Hãy restart process zalo-bot một lần để nạp code mới; trên VPS dùng PM2, không cần chạy login bằng terminal.",
+    },
+    { status: 503 },
+  );
 }

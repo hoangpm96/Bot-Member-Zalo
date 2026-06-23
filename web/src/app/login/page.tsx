@@ -89,10 +89,20 @@ export default function LoginPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ confirm: "RELOGIN" }),
       });
-      const json = (await res.json()) as { error?: string };
+      const json = (await res.json()) as {
+        error?: string;
+        status?: QrStatus;
+      };
       if (!res.ok) throw new Error(json.error || "Không gửi được yêu cầu");
+      if (json.status) {
+        setStatus(json.status);
+        setImgTs(Date.now());
+      }
+      setReloginPending(false);
       setActionMessage(
-        "Đã gửi yêu cầu. Chờ vài giây rồi bấm Kiểm tra trạng thái để tải QR mới.",
+        json.status?.state === "logged_in"
+          ? "Bot đã đăng nhập."
+          : "QR đã sẵn sàng. Quét mã bên trái bằng app Zalo.",
       );
     } catch (e) {
       setReloginPending(false);
@@ -134,7 +144,7 @@ export default function LoginPage() {
               <div className="py-16 text-center text-sm text-[var(--color-muted)]">
                 {expired
                   ? "Mã QR đã hết hạn — đang tạo mã mới…"
-                  : "Chưa có mã QR. Khởi động bot để bắt đầu phiên đăng nhập."}
+                  : "Chưa có mã QR. Bấm Bắt đầu đăng nhập để tạo mã."}
               </div>
             )}
           </div>
@@ -158,7 +168,7 @@ export default function LoginPage() {
                 >
                   <RotateCcw size={16} aria-hidden="true" />
                   {reloginPending
-                    ? "Đã gửi yêu cầu"
+                    ? "Đang tạo QR..."
                     : firstLogin
                       ? "Bắt đầu đăng nhập"
                       : "Đăng nhập lại"}
