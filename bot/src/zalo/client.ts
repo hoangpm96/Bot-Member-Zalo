@@ -58,6 +58,23 @@ export function normalizeTs(raw: unknown): number | null {
   return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
 }
 
+type LoginState = "waiting_scan" | "scanned" | "logged_in" | "expired" | "declined";
+
+/** Ghi trạng thái login + đường dẫn QR ra file để web panel hiển thị. */
+function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): void {
+  try {
+    const p = path.join(config.sessionDir, "login-status.json");
+    fs.mkdirSync(config.sessionDir, { recursive: true });
+    fs.writeFileSync(
+      p,
+      JSON.stringify({ state, qr: "qr.png", updatedAt: Date.now(), ...extra }, null, 2),
+      "utf8",
+    );
+  } catch {
+    /* không chặn login nếu ghi status lỗi */
+  }
+}
+
 /**
  * Đăng nhập, ƯU TIÊN tái dùng session đã lưu (KHÔNG login lặp — login dồn dập dễ bị
  * khoá tài khoản). Chỉ hiện QR khi chưa có session hoặc session hỏng.
@@ -74,6 +91,7 @@ export async function login(): Promise<ZaloApi> {
         userAgent: saved.userAgent,
       });
       console.log("[zalo] Đăng nhập lại bằng session đã lưu.");
+      writeLoginStatus("logged_in");
       return api;
     } catch (e) {
       console.warn(`[zalo] Session không dùng được, cần quét lại QR. (${String(e)})`);
@@ -96,23 +114,32 @@ export async function login(): Promise<ZaloApi> {
           qrcodeTerminal.generate(code, { small: true });
           console.log("");
         }
-        // 2) Đồng thời lưu ra file ảnh (tiện khi chạy trên máy có màn hình).
+        // 2) Lưu ra file ảnh — cách quét ĐÁNG TIN nhất (QR terminal hay lỗi camera).
+        //    Mở web panel trang /login để xem ảnh này cho dễ quét.
         const save = event?.actions?.saveToFile;
         if (typeof save === "function") {
           Promise.resolve(save(qrPath))
-            .then(() => console.log(`[zalo] (Hoặc mở ảnh QR: ${path.resolve(qrPath)})\n`))
+            .then(() => {
+              console.log(`[zalo] 📷 QR ảnh: ${path.resolve(qrPath)} — hoặc mở web panel /login để quét.`);
+              writeLoginStatus("waiting_scan");
+            })
             .catch(() => {});
+        } else {
+          writeLoginStatus("waiting_scan");
         }
         break;
       }
       case LoginQRCallbackEventType.QRCodeScanned:
         console.log(`[zalo] ✅ Đã quét QR (${event?.data?.display_name ?? ""}). Đang hoàn tất...`);
+        writeLoginStatus("scanned", { displayName: event?.data?.display_name ?? "" });
         break;
       case LoginQRCallbackEventType.QRCodeExpired:
         console.warn("[zalo] ⚠️  Mã QR hết hạn — đang tạo mã mới...");
+        writeLoginStatus("expired");
         break;
       case LoginQRCallbackEventType.QRCodeDeclined:
         console.warn("[zalo] ❌ Đăng nhập bị từ chối trên điện thoại.");
+        writeLoginStatus("declined");
         break;
       case LoginQRCallbackEventType.GotLoginInfo: {
         const data = event?.data;
@@ -123,6 +150,7 @@ export async function login(): Promise<ZaloApi> {
             userAgent: data.userAgent,
           });
           console.log("[zalo] 💾 Đã lưu session — lần sau khỏi quét lại.");
+          writeLoginStatus("logged_in");
         }
         break;
       }
