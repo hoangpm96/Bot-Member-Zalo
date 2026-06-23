@@ -13,6 +13,7 @@
     "export-members": "tsx src/index.ts export-members",
     "import-interactions": "tsx src/index.ts import-interactions",
     "sync-votes": "tsx src/index.ts sync-votes",
+    "telegram-test": "tsx src/index.ts telegram-test",
     "cleanup-warn": "tsx src/index.ts cleanup-warn",
     "monthly-cleanup": "tsx src/index.ts monthly-cleanup",
     "telegram-poll": "tsx src/index.ts telegram-poll",

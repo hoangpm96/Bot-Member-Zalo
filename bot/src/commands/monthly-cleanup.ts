@@ -309,8 +309,17 @@ export async function runMonthlyCleanup(): Promise<void> {
 }
 
 export async function runTelegramPoll(): Promise<void> {
+  if (!isTelegramEnabled()) {
+    console.error(
+      "[telegram-poll] Chưa cấu hình Telegram. Điền TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID vào .env.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const now = Date.now();
   const updates = await pollTelegramUpdates(now);
+  console.log(`[telegram-poll] Đã kết nối Telegram OK. Nhận ${updates.length} update mới.`);
 
   for (const u of updates) {
     if (u.callbackData?.startsWith("cleanup:")) {
@@ -371,6 +380,10 @@ export async function runTelegramPoll(): Promise<void> {
       `⏰ Kỳ dọn dẹp #${pending.id} quá ${runtimeConfig.approvalTimeoutHours}h chưa phản hồi, tự động tiến hành.`,
     );
     await executeScanRun(pending.id, "telegram-timeout");
+  } else if (pending) {
+    console.log(`[telegram-poll] Kỳ #${pending.id} đang chờ duyệt (chưa tới hạn timeout).`);
+  } else {
+    console.log("[telegram-poll] Không có kỳ nào chờ duyệt. Xong.");
   }
 }
 

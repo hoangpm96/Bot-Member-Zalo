@@ -4,6 +4,7 @@ import { runListGroups } from "./commands/list-groups.js";
 import { runCleanupWarn, runMonthlyCleanup, runTelegramPoll } from "./commands/monthly-cleanup.js";
 import { runImportInteractions } from "./commands/import-interactions.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
+import { runTelegramTest } from "./commands/telegram-test.js";
 
 /**
  * Entrypoint. Chọn lệnh qua arg đầu tiên:
@@ -25,6 +26,7 @@ Cách dùng:
   npm run export-members    # xuất danh sách member ra CSV (tra ID cho VIP list)
   npm run import-interactions -- ./data/manual-votes.csv
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
+  npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
@@ -48,6 +50,9 @@ async function main(): Promise<void> {
       break;
     case "sync-votes":
       await runSyncVotes();
+      break;
+    case "telegram-test":
+      await runTelegramTest();
       break;
     case "cleanup-warn":
       await runCleanupWarn();
