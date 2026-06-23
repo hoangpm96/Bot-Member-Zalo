@@ -27,7 +27,9 @@ module.exports = {
     {
       name: "zalo-web",
       script: "npm",
-      args: "start",
+      // -H 127.0.0.1: chỉ nghe localhost. Web ra ngoài qua Nginx reverse proxy,
+      // không phơi PORT thẳng ra Internet (tránh bỏ qua Basic Auth ở tầng Nginx).
+      args: "start -- -H 127.0.0.1",
       cwd: path.resolve(__dirname, "../web"),
       autorestart: true,
       restart_delay: 5000,
