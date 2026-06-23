@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LayoutDashboard, Users, History, Settings, LogIn } from "lucide-react";
+import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,6 +11,7 @@ export const metadata: Metadata = {
 const NAV = [
   { href: "/", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/members", label: "Thành viên", icon: Users },
+  { href: "/messages", label: "Tin nhắn", icon: MessageSquare },
   { href: "/history", label: "Lịch sử dọn", icon: History },
   { href: "/settings", label: "Cấu hình", icon: Settings },
   { href: "/login", label: "Đăng nhập", icon: LogIn },

@@ -1,7 +1,6 @@
-import { PageHeader, Table, Th, Td, Card, CardTitle, EmptyState } from "@/components/ui";
+import { PageHeader, Table, Th, Td, Card, CardTitle, EmptyState, RunStatusBadge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import { dbExists, listRemovals, listScanRuns } from "@/lib/db";
-import { RunStatusBadge } from "../page";
 
 export const dynamic = "force-dynamic";
 

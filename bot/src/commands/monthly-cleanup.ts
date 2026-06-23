@@ -28,6 +28,7 @@ import {
 import { login, getGroupSnapshot, removeGroupMember, sendGroupText, sleep } from "../zalo/client.js";
 import {
   answerCallbackQuery,
+  editTelegramMessage,
   pollTelegramUpdates,
   sendApprovalMessage,
   sendTelegramText,
@@ -331,6 +332,13 @@ export async function runTelegramPoll(): Promise<void> {
         const run = getScanRun(scanRunId);
         if (!run || run.status !== "pending_approval") {
           if (u.callbackQueryId) await answerCallbackQuery(u.callbackQueryId, "Kỳ này không còn chờ duyệt.");
+          if (u.chatId && u.messageId) {
+            await editTelegramMessage({
+              chatId: u.chatId,
+              messageId: u.messageId,
+              text: `Kỳ dọn dẹp #${scanRunId} không còn chờ duyệt (status: ${run?.status ?? "không tồn tại"}).`,
+            });
+          }
           continue;
         }
         markCleanupPlanItemsForRun({
@@ -348,6 +356,13 @@ export async function runTelegramPoll(): Promise<void> {
           note: "Admin huỷ qua Telegram.",
         });
         if (u.callbackQueryId) await answerCallbackQuery(u.callbackQueryId, "Đã huỷ kỳ dọn dẹp.");
+        if (u.chatId && u.messageId) {
+          await editTelegramMessage({
+            chatId: u.chatId,
+            messageId: u.messageId,
+            text: `Đã huỷ kỳ dọn dẹp #${scanRunId}. Không có thành viên nào bị xoá.`,
+          });
+        }
         await sendTelegramText(`🚫 Đã huỷ kỳ dọn dẹp #${scanRunId}. Không có thành viên nào bị xoá.`);
       }
 
@@ -355,9 +370,23 @@ export async function runTelegramPoll(): Promise<void> {
         const run = getScanRun(scanRunId);
         if (!run || run.status !== "pending_approval") {
           if (u.callbackQueryId) await answerCallbackQuery(u.callbackQueryId, "Kỳ này không còn chờ duyệt.");
+          if (u.chatId && u.messageId) {
+            await editTelegramMessage({
+              chatId: u.chatId,
+              messageId: u.messageId,
+              text: `Kỳ dọn dẹp #${scanRunId} không còn chờ duyệt (status: ${run?.status ?? "không tồn tại"}).`,
+            });
+          }
           continue;
         }
         if (u.callbackQueryId) await answerCallbackQuery(u.callbackQueryId, "Đã duyệt, bắt đầu xử lý.");
+        if (u.chatId && u.messageId) {
+          await editTelegramMessage({
+            chatId: u.chatId,
+            messageId: u.messageId,
+            text: `Đã duyệt kỳ dọn dẹp #${scanRunId}. Bot đang xử lý xoá thành viên.`,
+          });
+        }
         await executeScanRun(scanRunId, "telegram-approve");
       }
     }

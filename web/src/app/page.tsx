@@ -1,5 +1,5 @@
 import { LayoutDashboard } from "lucide-react";
-import { Stat, PageHeader, Card, CardTitle, Badge, EmptyState } from "@/components/ui";
+import { Stat, PageHeader, Card, CardTitle, EmptyState, RunStatusBadge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import {
   dbExists,
@@ -95,20 +95,4 @@ export default function DashboardPage() {
       </div>
     </div>
   );
-}
-
-export function RunStatusBadge({ status }: { status: string }) {
-  const map: Record<string, { tone: "ok" | "warn" | "danger" | "muted" | "default"; label: string }> = {
-    done: { tone: "ok", label: "hoàn tất" },
-    kicking: { tone: "warn", label: "đang kick" },
-    pending_approval: { tone: "warn", label: "chờ duyệt" },
-    planned: { tone: "default", label: "đã lập DS" },
-    cancelled: { tone: "muted", label: "đã huỷ" },
-    skipped: { tone: "muted", label: "bỏ qua" },
-    failed: { tone: "danger", label: "lỗi" },
-    collecting: { tone: "muted", label: "đang quét" },
-    warned: { tone: "default", label: "đã cảnh báo" },
-  };
-  const m = map[status] ?? { tone: "default" as const, label: status };
-  return <Badge tone={m.tone}>{m.label}</Badge>;
 }

@@ -1,6 +1,15 @@
 import { config } from "./config.js";
-import { login, getGroupSnapshot, normalizeTs, fetchGroupPollVotes } from "./zalo/client.js";
-import { logInteraction, upsertMember, markMemberLeft, getMember } from "./db/index.js";
+import {
+  login,
+  getGroupSnapshot,
+  normalizeTs,
+  fetchGroupPollVotes,
+  consumeReloginRequest,
+  reloginRequestExists,
+  hasSavedCredentials,
+  writeLoginReadyStatus,
+} from "./zalo/client.js";
+import { logInteraction, upsertMember, markMemberLeft, getMember, saveGroupMessage } from "./db/index.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -37,6 +46,22 @@ function extractTs(payload: any, now: number): number {
   return normalizeTs(payload?.data?.ts ?? payload?.ts) ?? now;
 }
 
+function extractText(payload: any): string | null {
+  const content = payload?.data?.content;
+  if (typeof content !== "string") return null;
+  const text = content.trim();
+  return text ? text : null;
+}
+
+function extractMessageId(payload: any, sender: string, ts: number, text: string): string {
+  const data = payload?.data ?? {};
+  const raw = data.msgId ?? data.cliMsgId ?? data.realMsgId ?? data.actionId ?? "";
+  const id = String(raw).trim();
+  if (id) return id;
+  // Defensive fallback for unexpected zca-js payloads; keeps UNIQUE deterministic enough.
+  return `${sender}:${ts}:${text.slice(0, 120)}`;
+}
+
 function fmtTime(ts: number | null): string {
   if (!ts) return "chưa có";
   return new Date(ts).toLocaleString("vi-VN", { hour12: false });
@@ -60,6 +85,32 @@ async function syncMembersOnce(api: any, now: number): Promise<void> {
 }
 
 export async function runListener(): Promise<void> {
+  const requestedAtStart = consumeReloginRequest();
+  if (requestedAtStart) {
+    console.log("[listener] Đã nhận yêu cầu đăng nhập lại trước khi khởi động.");
+  }
+
+  if (!hasSavedCredentials() && !requestedAtStart) {
+    writeLoginReadyStatus();
+    console.log("[listener] Chưa có Zalo session. Đang chờ thao tác đăng nhập trên web /login.");
+    await new Promise<void>((resolve) => {
+      const timer = setInterval(() => {
+        if (!consumeReloginRequest()) return;
+        clearInterval(timer);
+        resolve();
+      }, 1_000);
+    });
+    console.log("[listener] Đã nhận yêu cầu đăng nhập lần đầu. Đang tạo QR...");
+  }
+
+  // Khi listener/login đang hoạt động, giữ marker qua lần restart. Process mới sẽ
+  // consume marker, dọn credential rồi tạo QR; như vậy không có hai socket song song.
+  setInterval(() => {
+    if (!reloginRequestExists()) return;
+    console.log("[listener] Dashboard yêu cầu đăng nhập lại. Đang restart để tạo QR mới...");
+    process.exit(0);
+  }, 1_000);
+
   const now = Date.now();
   const startedAt = ensureWarmupStarted(now);
   console.log(
@@ -70,18 +121,49 @@ export async function runListener(): Promise<void> {
   const api = await login();
   await syncMembersOnce(api, now);
 
+  if (!config.groupId) {
+    console.warn(
+      "[listener] Đã đăng nhập nhưng GROUP_ID chưa được cấu hình. Bot đang tạm ngưng; " +
+        "điền GROUP_ID rồi restart zalo-bot.",
+    );
+    await new Promise<never>(() => {
+      // Giữ process ổn định để PM2 không restart liên tục trong lúc chờ cấu hình.
+    });
+  }
+
   let messageEvents = 0;
   let reactionEvents = 0;
+  let selfEvents = 0;
   let lastEventAt: number | null = null;
   let lastEventType: "message" | "reaction" | null = null;
   let lastEventSender = "";
+  let socketState: "starting" | "connected" | "disconnected" | "closed" | "error" = "starting";
 
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
   function record(payload: any, type: "message" | "reaction"): void {
-    if (!isTargetThread(payload?.threadId ?? payload?.data?.idTo)) return;
+    const threadId = String(payload?.threadId ?? payload?.data?.idTo ?? "");
+    if (!isTargetThread(threadId)) return;
     const sender = extractSender(payload);
     if (!sender) return;
     const ts = extractTs(payload, Date.now());
+    if (type === "message") {
+      const text = extractText(payload);
+      if (text) {
+        upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
+        saveGroupMessage({
+          threadId,
+          messageId: extractMessageId(payload, sender, ts, text),
+          zaloUserId: sender,
+          displayName: String(payload?.data?.dName ?? ""),
+          text,
+          msgType: String(payload?.data?.msgType ?? ""),
+          ts,
+          isSelf: Boolean(payload?.isSelf),
+          now: Date.now(),
+        });
+      }
+    }
+    if (payload?.isSelf) selfEvents += 1;
     if (type === "message") {
       upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
     }
@@ -98,7 +180,7 @@ export async function runListener(): Promise<void> {
     if (every > 0 && totalEvents % every === 0) {
       console.log(
         `[listener] Nhận ${type}: user=${sender}, ` +
-          `event=${totalEvents} (message=${messageEvents}, reaction=${reactionEvents}), ` +
+          `event=${totalEvents} (message=${messageEvents}, reaction=${reactionEvents}, self=${selfEvents}), ` +
           `zalo_ts=${fmtTime(ts)}.`,
       );
     }
@@ -141,15 +223,35 @@ export async function runListener(): Promise<void> {
     }
   });
 
-  api.listener.start();
+  api.listener.on("connected", () => {
+    socketState = "connected";
+    console.log("[listener] WebSocket connected.");
+  });
+
+  api.listener.on("disconnected", (code: number, reason: string) => {
+    socketState = "disconnected";
+    console.warn(`[listener] WebSocket disconnected: code=${code}, reason=${reason || "-"}.`);
+  });
+
+  api.listener.on("closed", (code: number, reason: string) => {
+    socketState = "closed";
+    console.warn(`[listener] WebSocket closed: code=${code}, reason=${reason || "-"}.`);
+  });
+
+  api.listener.on("error", (err: unknown) => {
+    socketState = "error";
+    console.warn(`[listener] WebSocket error: ${String(err)}`);
+  });
+
+  api.listener.start({ retryOnClose: true });
   console.log("[listener] Đang lắng nghe (message + reaction + group_event). Ctrl+C để dừng.");
 
   if (config.listenerHeartbeatMs > 0) {
     setInterval(() => {
       const totalEvents = messageEvents + reactionEvents;
       console.log(
-        `[listener] Heartbeat OK: event=${totalEvents} ` +
-          `(message=${messageEvents}, reaction=${reactionEvents}), ` +
+        `[listener] Heartbeat OK: socket=${socketState}, event=${totalEvents} ` +
+          `(message=${messageEvents}, reaction=${reactionEvents}, self=${selfEvents}), ` +
           `last=${lastEventType ?? "chưa có"} user=${lastEventSender || "-"} at=${fmtTime(lastEventAt)}.`,
       );
     }, config.listenerHeartbeatMs);

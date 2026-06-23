@@ -11,6 +11,7 @@ export interface TelegramUpdate {
   callbackData: string | null;
   callbackQueryId: string | null;
   chatId: string | null;
+  messageId: number | null;
 }
 
 function isConfigured(): boolean {
@@ -71,6 +72,20 @@ export async function answerCallbackQuery(callbackQueryId: string, text: string)
   });
 }
 
+export async function editTelegramMessage(input: {
+  chatId: string;
+  messageId: number;
+  text: string;
+}): Promise<void> {
+  await telegramCall("editMessageText", {
+    chat_id: input.chatId,
+    message_id: input.messageId,
+    text: input.text,
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: [] },
+  });
+}
+
 export async function pollTelegramUpdates(now: number): Promise<TelegramUpdate[]> {
   assertTelegramConfigured();
   const offsetRaw = getBotState(KEY_TELEGRAM_OFFSET);
@@ -94,6 +109,12 @@ export async function pollTelegramUpdates(now: number): Promise<TelegramUpdate[]
       callbackQueryId:
         typeof u?.callback_query?.id === "string" ? u.callback_query.id : null,
       chatId: String(u?.message?.chat?.id ?? u?.callback_query?.message?.chat?.id ?? ""),
+      messageId:
+        typeof u?.message?.message_id === "number"
+          ? u.message.message_id
+          : typeof u?.callback_query?.message?.message_id === "number"
+            ? u.callback_query.message.message_id
+            : null,
     });
   }
 

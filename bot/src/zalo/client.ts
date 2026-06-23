@@ -58,7 +58,10 @@ export function normalizeTs(raw: unknown): number | null {
   return n < 1e12 ? Math.round(n * 1000) : Math.round(n);
 }
 
-type LoginState = "waiting_scan" | "scanned" | "logged_in" | "expired" | "declined";
+type LoginState = "ready" | "waiting_scan" | "scanned" | "logged_in" | "expired" | "declined";
+
+const LOGIN_RUNTIME_FILES = ["session.json", "qr.png", "login-status.json"] as const;
+const RELOGIN_REQUEST_FILE = "relogin-request.json";
 
 /** Ghi trạng thái login + đường dẫn QR ra file để web panel hiển thị. */
 function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): void {
@@ -76,11 +79,45 @@ function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): v
 }
 
 /**
+ * Nhận yêu cầu đăng nhập lại do dashboard ghi vào SESSION_DIR.
+ * Marker được xoá trước để PM2 restart không tạo vòng lặp; credential/QR cũ được
+ * dọn bởi chính bot thay vì cho web process trực tiếp thao tác secret.
+ */
+export function consumeReloginRequest(): boolean {
+  const requestPath = path.join(config.sessionDir, RELOGIN_REQUEST_FILE);
+  if (!fs.existsSync(requestPath)) return false;
+
+  try {
+    fs.rmSync(requestPath, { force: true });
+    for (const file of LOGIN_RUNTIME_FILES) {
+      fs.rmSync(path.join(config.sessionDir, file), { force: true });
+    }
+    return true;
+  } catch (e) {
+    console.warn(`[zalo] Không xử lý được yêu cầu đăng nhập lại: ${String(e)}`);
+    return false;
+  }
+}
+
+export function reloginRequestExists(): boolean {
+  return fs.existsSync(path.join(config.sessionDir, RELOGIN_REQUEST_FILE));
+}
+
+export function hasSavedCredentials(): boolean {
+  return loadCredentials() !== null;
+}
+
+export function writeLoginReadyStatus(): void {
+  fs.rmSync(path.join(config.sessionDir, "qr.png"), { force: true });
+  writeLoginStatus("ready");
+}
+
+/**
  * Đăng nhập, ƯU TIÊN tái dùng session đã lưu (KHÔNG login lặp — login dồn dập dễ bị
  * khoá tài khoản). Chỉ hiện QR khi chưa có session hoặc session hỏng.
  */
 export async function login(): Promise<ZaloApi> {
-  const zalo = new Zalo();
+  const zalo = new Zalo({ selfListen: config.zaloSelfListen });
   const saved = loadCredentials();
 
   if (saved) {
@@ -388,6 +425,14 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
  * để user không tưởng bot đã xoá thành công.
  */
 export async function removeGroupMember(api: ZaloApi, groupId: string, memberId: string): Promise<void> {
+  function assertRemoved(resp: unknown, method: string): void {
+    const errorMembers = (resp as { errorMembers?: unknown })?.errorMembers;
+    if (!Array.isArray(errorMembers)) return;
+    if (errorMembers.map(String).includes(memberId)) {
+      throw new Error(`${method} không xoá được member ${memberId} (Zalo trả errorMembers).`);
+    }
+  }
+
   const candidates = [
     "removeUserFromGroup",
     "removeMemberFromGroup",
@@ -399,11 +444,13 @@ export async function removeGroupMember(api: ZaloApi, groupId: string, memberId:
     const fn = api?.[name];
     if (typeof fn !== "function") continue;
     try {
-      await fn.call(api, memberId, groupId);
+      const resp = await fn.call(api, memberId, groupId);
+      assertRemoved(resp, name);
       return;
     } catch (firstError) {
       try {
-        await fn.call(api, groupId, memberId);
+        const resp = await fn.call(api, groupId, memberId);
+        assertRemoved(resp, name);
         return;
       } catch {
         throw firstError;

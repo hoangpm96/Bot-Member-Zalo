@@ -89,6 +89,19 @@ export interface CleanupPlanItemRow {
   updated_at: number;
 }
 
+export interface GroupMessageInput {
+  threadId: string;
+  messageId: string;
+  zaloUserId: string;
+  displayName?: string;
+  text: string;
+  msgType?: string;
+  ts: number;
+  isSelf?: boolean;
+  source?: "listener";
+  now: number;
+}
+
 // ---- Members ----
 
 /**
@@ -105,10 +118,10 @@ export function upsertMember(input: {
   getDb()
     .prepare(
       `INSERT INTO members (zalo_user_id, display_name, role, joined_at, first_seen_at, is_active, left_at)
-       VALUES (@id, @name, @role, @joinedAt, @now, 1, NULL)
+       VALUES (@id, @name, @roleInsert, @joinedAt, @now, 1, NULL)
        ON CONFLICT(zalo_user_id) DO UPDATE SET
          display_name = CASE WHEN @name != '' THEN @name ELSE display_name END,
-         role         = @role,
+         role         = CASE WHEN @role != '' THEN @role ELSE role END,
          joined_at    = COALESCE(members.joined_at, @joinedAt),
          is_active    = 1,
          left_at      = NULL`,
@@ -116,7 +129,8 @@ export function upsertMember(input: {
     .run({
       id: input.zaloUserId,
       name: input.displayName ?? "",
-      role: input.role ?? "member",
+      role: input.role ?? "",
+      roleInsert: input.role ?? "member",
       joinedAt: input.joinedAt ?? null,
       now: input.now,
     });
@@ -157,6 +171,31 @@ export function logInteraction(input: {
       type: input.type,
       ts: input.ts,
       source: input.source ?? "listener",
+    });
+}
+
+// ---- Group text message archive ----
+
+/** Lưu text message để sau này export/tổng hợp blog. Dedupe theo thread_id + message_id. */
+export function saveGroupMessage(input: GroupMessageInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO group_messages
+         (thread_id, message_id, zalo_user_id, display_name, text, msg_type, ts, is_self, source, created_at)
+       VALUES
+         (@threadId, @messageId, @zaloUserId, @displayName, @text, @msgType, @ts, @isSelf, @source, @now)`,
+    )
+    .run({
+      threadId: input.threadId,
+      messageId: input.messageId,
+      zaloUserId: input.zaloUserId,
+      displayName: input.displayName ?? "",
+      text: input.text,
+      msgType: input.msgType ?? "",
+      ts: input.ts,
+      isSelf: input.isSelf ? 1 : 0,
+      source: input.source ?? "listener",
+      now: input.now,
     });
 }
 

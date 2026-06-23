@@ -16,8 +16,10 @@ const QR_DIR =
 
 const STATUS_PATH = path.join(QR_DIR, "login-status.json");
 const QR_IMAGE_PATH = path.join(QR_DIR, "qr.png");
+const RELOGIN_REQUEST_PATH = path.join(QR_DIR, "relogin-request.json");
 
 export type LoginState =
+  | "ready"
   | "waiting_scan"
   | "scanned"
   | "logged_in"
@@ -32,6 +34,7 @@ export interface LoginStatus {
 }
 
 const KNOWN_STATES: LoginState[] = [
+  "ready",
   "waiting_scan",
   "scanned",
   "logged_in",
@@ -83,4 +86,9 @@ export function qrImagePath(): string {
 /** Ảnh QR có tồn tại không. */
 export function qrImageExists(): boolean {
   return fs.existsSync(QR_IMAGE_PATH);
+}
+
+/** Đường dẫn marker để dashboard yêu cầu bot tự xoá session và login lại. */
+export function reloginRequestPath(): string {
+  return RELOGIN_REQUEST_PATH;
 }

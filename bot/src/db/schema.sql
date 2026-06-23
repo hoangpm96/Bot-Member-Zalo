@@ -35,6 +35,27 @@ CREATE INDEX IF NOT EXISTS idx_interactions_user_ts ON interactions(zalo_user_id
 CREATE UNIQUE INDEX IF NOT EXISTS idx_interactions_dedupe
   ON interactions(zalo_user_id, ts, type, source);
 
+-- Lưu nội dung tin nhắn text trong group để sau này tổng hợp/viết blog.
+-- Chỉ lưu text message của GROUP_ID target; không lưu ảnh/audio/file/sticker.
+CREATE TABLE IF NOT EXISTS group_messages (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id      TEXT NOT NULL,
+  message_id     TEXT NOT NULL,
+  zalo_user_id   TEXT NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  text           TEXT NOT NULL,
+  msg_type       TEXT NOT NULL DEFAULT '',
+  ts             INTEGER NOT NULL,
+  is_self        INTEGER NOT NULL DEFAULT 0,
+  source         TEXT NOT NULL DEFAULT 'listener',
+  created_at     INTEGER NOT NULL,
+  FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
+  UNIQUE (thread_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_messages_ts ON group_messages(ts);
+CREATE INDEX IF NOT EXISTS idx_group_messages_user_ts ON group_messages(zalo_user_id, ts);
+
 -- Các kỳ quét/dọn dẹp.
 CREATE TABLE IF NOT EXISTS scan_runs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -55,6 +55,22 @@ export function Badge({
   );
 }
 
+export function RunStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { tone: BadgeTone; label: string }> = {
+    done: { tone: "ok", label: "hoàn tất" },
+    kicking: { tone: "warn", label: "đang kick" },
+    pending_approval: { tone: "warn", label: "chờ duyệt" },
+    planned: { tone: "default", label: "đã lập DS" },
+    cancelled: { tone: "muted", label: "đã huỷ" },
+    skipped: { tone: "muted", label: "bỏ qua" },
+    failed: { tone: "danger", label: "lỗi" },
+    collecting: { tone: "muted", label: "đang quét" },
+    warned: { tone: "default", label: "đã cảnh báo" },
+  };
+  const m = map[status] ?? { tone: "default" as const, label: status };
+  return <Badge tone={m.tone}>{m.label}</Badge>;
+}
+
 export function Button({
   className,
   variant = "primary",

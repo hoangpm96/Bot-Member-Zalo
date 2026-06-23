@@ -54,6 +54,9 @@ export const config = {
   /** Log mỗi N event message/reaction nhận được. 1 = log từng event, 0 = tắt. */
   listenerEventLogEvery: readInt("LISTENER_EVENT_LOG_EVERY", 1),
 
+  /** Cho phép zca-js emit event do chính tài khoản bot gửi để lưu và tính interaction. */
+  zaloSelfListen: readBool("ZALO_SELF_LISTEN", true),
+
   /** Trần số member xoá trong một kỳ cleanup (brainstorm: 50). */
   maxKicksPerRun: readInt("MAX_KICKS_PER_RUN", 50),
 

@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardTitle, Badge, PageHeader } from "@/components/ui";
+import { RefreshCw, RotateCcw } from "lucide-react";
+import { Card, CardTitle, Badge, Button, PageHeader } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 
 type LoginState =
+  | "ready"
   | "waiting_scan"
   | "scanned"
   | "logged_in"
@@ -23,6 +25,7 @@ const STATE_META: Record<
   LoginState,
   { label: string; tone: "default" | "ok" | "warn" | "danger" | "muted" }
 > = {
+  ready: { label: "Sẵn sàng đăng nhập", tone: "muted" },
   waiting_scan: { label: "Chờ quét", tone: "warn" },
   scanned: { label: "Đã quét — chờ xác nhận", tone: "default" },
   logged_in: { label: "Đã đăng nhập", tone: "ok" },
@@ -34,37 +37,68 @@ const STATE_META: Record<
 export default function LoginPage() {
   const [status, setStatus] = useState<QrStatus | null>(null);
   const [imgTs, setImgTs] = useState(0);
+  const [reloginPending, setReloginPending] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+
+  async function checkStatus() {
+    setChecking(true);
+    try {
+      const res = await fetch("/api/qr", { cache: "no-store" });
+      if (!res.ok) throw new Error("Không đọc được trạng thái đăng nhập");
+      const json = (await res.json()) as QrStatus;
+      setStatus(json);
+      // Đổi query timestamp để tải lại ảnh nếu Zalo vừa tạo QR mới.
+      setImgTs(Date.now());
+      if (json.state === "waiting_scan" || json.state === "scanned") {
+        setReloginPending(false);
+      }
+    } catch (e) {
+      setStatus(null);
+      setActionMessage(e instanceof Error ? e.message : "Không đọc được trạng thái đăng nhập");
+    } finally {
+      setChecking(false);
+    }
+  }
 
   useEffect(() => {
-    let active = true;
-
-    async function poll() {
-      try {
-        const res = await fetch("/api/qr", { cache: "no-store" });
-        const json = (await res.json()) as QrStatus;
-        if (active) {
-          setStatus(json);
-          // Đổi query timestamp để buộc trình duyệt tải lại ảnh QR mới.
-          setImgTs(Date.now());
-        }
-      } catch {
-        if (active) setStatus(null);
-      }
-    }
-
-    poll();
-    const id = setInterval(poll, 2000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
+    void checkStatus();
   }, []);
 
   const state = status?.state ?? "unknown";
   const meta = STATE_META[state];
   const loggedIn = state === "logged_in";
+  const firstLogin = state === "ready" || state === "unknown";
   const expired = state === "expired";
   const showQr = !loggedIn && (status?.hasQr ?? false);
+
+  async function requestRelogin() {
+    if (
+      !window.confirm(
+        "Đăng xuất session Zalo hiện tại và tạo QR mới? Listener sẽ restart trong vài giây.",
+      )
+    ) {
+      return;
+    }
+
+    setReloginPending(true);
+    setActionMessage(null);
+    try {
+      const res = await fetch("/api/qr/relogin", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: "RELOGIN" }),
+      });
+      const json = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(json.error || "Không gửi được yêu cầu");
+      setActionMessage(
+        "Đã gửi yêu cầu. Chờ vài giây rồi bấm Kiểm tra trạng thái để tải QR mới.",
+      );
+    } catch (e) {
+      setReloginPending(false);
+      setActionMessage(e instanceof Error ? e.message : "Không gửi được yêu cầu");
+    }
+  }
 
   return (
     <div>
@@ -111,6 +145,42 @@ export default function LoginPage() {
           <div className="mt-4 flex flex-col gap-4">
             <div className="flex items-center gap-2">
               <Badge tone={meta.tone}>{meta.label}</Badge>
+            </div>
+
+            <div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="danger"
+                  disabled={reloginPending}
+                  onClick={requestRelogin}
+                  className="gap-2"
+                >
+                  <RotateCcw size={16} aria-hidden="true" />
+                  {reloginPending
+                    ? "Đã gửi yêu cầu"
+                    : firstLogin
+                      ? "Bắt đầu đăng nhập"
+                      : "Đăng nhập lại"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={checking}
+                  onClick={() => void checkStatus()}
+                  className="gap-2"
+                >
+                  <RefreshCw
+                    size={16}
+                    aria-hidden="true"
+                    className={checking ? "animate-spin" : undefined}
+                  />
+                  {checking ? "Đang kiểm tra..." : "Kiểm tra trạng thái"}
+                </Button>
+              </div>
+              {actionMessage ? (
+                <p className="mt-2 text-sm text-[var(--color-muted)]">{actionMessage}</p>
+              ) : null}
             </div>
 
             {expired ? (
