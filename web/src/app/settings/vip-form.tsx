@@ -1,14 +1,39 @@
 "use client";
 
-import { useState } from "react";
-import { Trash2, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Search, Trash2, UserPlus } from "lucide-react";
 import { Card, CardTitle, Button, Input } from "@/components/ui";
 import type { VipEntry } from "@/lib/vip";
+import type { MemberOption } from "@/lib/db";
 
-export function VipForm({ initial }: { initial: VipEntry[] }) {
+export function VipForm({
+  initial,
+  members,
+}: {
+  initial: VipEntry[];
+  members: MemberOption[];
+}) {
   const [entries, setEntries] = useState<VipEntry[]>(initial);
+  const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const memberById = useMemo(
+    () => new Map(members.map((member) => [member.id, member])),
+    [members],
+  );
+  const selectedIds = useMemo(() => new Set(entries.map((entry) => entry.id)), [entries]);
+  const matches = useMemo(() => {
+    const q = query.trim().toLocaleLowerCase("vi");
+    if (!q) return [];
+    return members
+      .filter(
+        (member) =>
+          !selectedIds.has(member.id) &&
+          (member.displayName.toLocaleLowerCase("vi").includes(q) || member.id.includes(q)),
+      )
+      .slice(0, 10);
+  }, [members, query, selectedIds]);
 
   function update(i: number, patch: Partial<VipEntry>) {
     setEntries((arr) => arr.map((e, idx) => (idx === i ? { ...e, ...patch } : e)));
@@ -16,8 +41,11 @@ export function VipForm({ initial }: { initial: VipEntry[] }) {
   function remove(i: number) {
     setEntries((arr) => arr.filter((_, idx) => idx !== i));
   }
-  function add() {
-    setEntries((arr) => [...arr, { id: "", note: "" }]);
+  function add(member: MemberOption) {
+    if (entries.length >= 100 || selectedIds.has(member.id)) return;
+    setEntries((arr) => [...arr, { id: member.id, note: "" }]);
+    setQuery("");
+    setMsg(null);
   }
 
   async function save() {
@@ -48,21 +76,65 @@ export function VipForm({ initial }: { initial: VipEntry[] }) {
     <Card>
       <CardTitle>Danh sách trắng (VIP) — không bao giờ bị kick</CardTitle>
       <p className="mt-1 mb-4 text-xs text-[var(--color-muted)]">
-        Tối đa 100 người. Lấy ID từ trang Thành viên. Lưu vào <code>vip-list.json</code> mà bot dùng.
+        Tìm và chọn từ thành viên đang hoạt động. Tối đa 100 người.
       </p>
+
+      <div className="relative mb-4 max-w-xl">
+        <Search
+          size={16}
+          className="pointer-events-none absolute left-3 top-[18px] -translate-y-1/2 text-[var(--color-muted)]"
+        />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Tìm theo tên hoặc Zalo ID"
+          aria-label="Tìm thành viên để thêm VIP"
+          className="pl-9"
+          disabled={entries.length >= 100}
+        />
+        {query.trim() ? (
+          <div className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-lg">
+            {matches.length ? (
+              matches.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => add(member)}
+                  className="flex w-full items-center gap-3 border-b border-[var(--color-border)] px-3 py-2.5 text-left last:border-b-0 hover:bg-[var(--color-surface-2)]"
+                >
+                  <UserPlus size={16} className="shrink-0 text-[var(--color-muted)]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-[var(--color-text)]">
+                      {member.displayName || "(không tên)"}
+                    </span>
+                    <span className="block truncate font-mono text-xs text-[var(--color-muted)]">
+                      {member.id}
+                    </span>
+                  </span>
+                  <span className="text-xs text-[var(--color-muted)]">{member.role}</span>
+                </button>
+              ))
+            ) : (
+              <p className="px-3 py-3 text-sm text-[var(--color-muted)]">
+                Không tìm thấy thành viên chưa có trong danh sách VIP.
+              </p>
+            )}
+          </div>
+        ) : null}
+      </div>
 
       <div className="flex flex-col gap-2">
         {entries.length === 0 ? (
           <p className="text-sm text-[var(--color-muted)]">Chưa có ai trong danh sách.</p>
         ) : (
           entries.map((e, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <Input
-                placeholder="zalo_user_id"
-                value={e.id}
-                onChange={(ev) => update(i, { id: ev.target.value })}
-                className="max-w-xs font-mono text-xs"
-              />
+            <div key={e.id} className="grid items-center gap-2 md:grid-cols-[minmax(220px,1fr)_minmax(220px,1fr)_auto]">
+              <div className="min-w-0 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                <div className="truncate text-sm font-medium text-[var(--color-text)]">
+                  {memberById.get(e.id)?.displayName || "(không còn trong danh sách thành viên)"}
+                </div>
+                <div className="truncate font-mono text-xs text-[var(--color-muted)]">{e.id}</div>
+              </div>
               <Input
                 placeholder="ghi chú (vd: đối tác)"
                 value={e.note ?? ""}
@@ -77,9 +149,6 @@ export function VipForm({ initial }: { initial: VipEntry[] }) {
       </div>
 
       <div className="mt-4 flex items-center gap-3">
-        <Button variant="ghost" onClick={add}>
-          <Plus size={15} className="mr-1" /> Thêm dòng
-        </Button>
         <Button onClick={() => void save()} disabled={saving}>
           {saving ? "Đang lưu..." : "Lưu danh sách"}
         </Button>

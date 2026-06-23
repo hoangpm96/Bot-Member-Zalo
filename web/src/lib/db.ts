@@ -83,6 +83,12 @@ export interface MemberSummary {
   total_interactions: number;
 }
 
+export interface MemberOption {
+  id: string;
+  displayName: string;
+  role: "owner" | "admin" | "member";
+}
+
 export interface RemovalRow {
   id: number;
   scan_run_id: number | null;
@@ -150,6 +156,18 @@ export function countByRole(): { owner: number; admin: number; member: number } 
 export function countInteractions(): number {
   const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
   return r.n;
+}
+
+export function listActiveMemberOptions(limit = 5000): MemberOption[] {
+  return getDb()
+    .prepare(
+      `SELECT zalo_user_id AS id, display_name AS displayName, role
+       FROM members
+       WHERE is_active = 1
+       ORDER BY LOWER(display_name) ASC, zalo_user_id ASC
+       LIMIT @limit`,
+    )
+    .all({ limit: Math.min(Math.max(limit, 1), 5000) }) as MemberOption[];
 }
 
 function tableExists(name: string): boolean {
