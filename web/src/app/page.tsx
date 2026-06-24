@@ -51,7 +51,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader title="Tổng quan" desc="Bảng điều khiển bot dọn thành viên group Zalo" />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Stat label="Thành viên đang có" value={total} sub={`${roles.member} thường · ${roles.admin} admin · ${roles.owner} owner`} />
         <Stat label="Mục tiêu giữ lại" value={target} sub={overTarget > 0 ? `vượt ${overTarget} người` : "đang ở/ dưới mục tiêu"} />
         <Stat
@@ -72,9 +72,9 @@ export default function DashboardPage() {
               {runs.map((r) => (
                 <div
                   key={r.id}
-                  className="flex items-center justify-between rounded-[var(--radius)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"
+                  className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-[var(--radius)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[var(--color-muted)]">#{r.id}</span>
                     <RunStatusBadge status={r.status} />
                     <span className="text-[var(--color-muted)]">{fmtDateTime(r.started_at)}</span>

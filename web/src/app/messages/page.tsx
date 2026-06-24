@@ -82,7 +82,7 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
         desc="Text message đã lưu từ group để export và tổng hợp nội dung sau này."
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <Stat label="Tin nhắn khớp bộ lọc" value={total} sub={`hiển thị ${messages.length} dòng mới nhất`} />
         <Stat label="Self trong trang" value={messages.filter((m) => m.is_self).length} sub="tin do tài khoản bot gửi" />
         <Stat label="Nguồn" value="listener" sub="chỉ lưu text message trong group" />

@@ -104,7 +104,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
         desc={`${summary.total} thành viên khớp bộ lọc — hiển thị ${members.length} dòng đầu tiên.`}
       />
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Stat
           label="Khớp bộ lọc"
           value={summary.total}

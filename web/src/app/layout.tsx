@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare } from "lucide-react";
 import "./globals.css";
@@ -8,13 +8,18 @@ export const metadata: Metadata = {
   description: "Bảng điều khiển bot dọn thành viên group Zalo",
 };
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+};
+
 const NAV = [
-  { href: "/", label: "Tổng quan", icon: LayoutDashboard },
-  { href: "/members", label: "Thành viên", icon: Users },
-  { href: "/messages", label: "Tin nhắn", icon: MessageSquare },
-  { href: "/history", label: "Lịch sử dọn", icon: History },
-  { href: "/settings", label: "Cấu hình", icon: Settings },
-  { href: "/login", label: "Đăng nhập", icon: LogIn },
+  { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
+  { href: "/members", label: "Thành viên", shortLabel: "Thành viên", icon: Users },
+  { href: "/messages", label: "Tin nhắn", shortLabel: "Tin nhắn", icon: MessageSquare },
+  { href: "/history", label: "Lịch sử dọn", shortLabel: "Lịch sử", icon: History },
+  { href: "/settings", label: "Cấu hình", shortLabel: "Cấu hình", icon: Settings },
+  { href: "/login", label: "Đăng nhập", shortLabel: "Đăng nhập", icon: LogIn },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -22,7 +27,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="vi">
       <body>
         <div className="flex min-h-screen">
-          <aside className="w-60 shrink-0 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+          {/* Sidebar — desktop only */}
+          <aside className="hidden md:flex md:w-60 md:shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] p-4">
             <div className="mb-6 px-2">
               <div className="text-sm font-semibold text-[var(--color-text)]">Bot Member Zalo</div>
               <div className="text-xs text-[var(--color-muted)]">Admin panel</div>
@@ -43,8 +49,26 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               })}
             </nav>
           </aside>
-          <main className="flex-1 overflow-auto p-8">{children}</main>
+
+          <main className="flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">{children}</main>
         </div>
+
+        {/* Bottom nav — mobile only */}
+        <nav className="fixed bottom-0 inset-x-0 z-50 flex md:hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex flex-1 flex-col items-center gap-1 py-2.5 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
+              >
+                <Icon size={20} />
+                <span className="text-[10px] leading-none">{item.shortLabel}</span>
+              </Link>
+            );
+          })}
+        </nav>
       </body>
     </html>
   );

@@ -9,7 +9,7 @@ import {
   hasSavedCredentials,
   writeLoginReadyStatus,
 } from "./zalo/client.js";
-import { logInteraction, upsertMember, markMemberLeft, getMember, saveGroupMessage } from "./db/index.js";
+import { logInteraction, upsertMember, markMemberLeft, getMember, getMemberStats, saveGroupMessage } from "./db/index.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -74,9 +74,13 @@ async function syncMembersOnce(api: any, now: number): Promise<void> {
   }
   try {
     const snap = await getGroupSnapshot(api, config.groupId);
+    const activeIds = new Set(snap.members.map((m) => m.id));
     for (const m of snap.members) {
       if (!m.id) continue;
       upsertMember({ zaloUserId: m.id, displayName: m.displayName, role: m.role, now });
+    }
+    for (const s of getMemberStats()) {
+      if (!activeIds.has(s.zalo_user_id)) markMemberLeft(s.zalo_user_id, now);
     }
     console.log(`[listener] Đồng bộ ${snap.members.length}/${snap.totalMember} thành viên group "${snap.name}".`);
   } catch (e) {
