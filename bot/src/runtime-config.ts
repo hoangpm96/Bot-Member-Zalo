@@ -23,6 +23,42 @@ function dbInt(key: string, min: number, max: number): number | null {
   return n;
 }
 
+/** Đọc bool từ bot_state ("1"/"true" = true). null nếu chưa đặt → caller tự fallback. */
+function dbBool(key: string): boolean | null {
+  const v = getBotState(key);
+  if (v === undefined || v.trim() === "") return null;
+  return v === "1" || v.toLowerCase() === "true";
+}
+
+export type ModerationAction = "delete_only" | "delete_and_ban";
+
+/**
+ * Đọc danh sách từ khoá cấm (JSON mảng string trong bot_state). Lọc rỗng, bỏ trùng (đã
+ * lower-case để khớp không phân biệt hoa/thường — vẫn GIỮ DẤU tiếng Việt). Input hỏng → [].
+ */
+function readBlacklistWords(): string[] {
+  const v = getBotState("cfg:blacklist_words");
+  if (!v || v.trim() === "") return [];
+  let raw: unknown;
+  try {
+    raw = JSON.parse(v);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const w = String(item ?? "").trim();
+    if (!w) continue;
+    const key = w.toLocaleLowerCase("vi");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
+  }
+  return out;
+}
+
 export const runtimeConfig = {
   get targetMemberCount(): number {
     return dbInt("cfg:target_member_count", 1, 100000) ?? config.targetMemberCount;
@@ -41,5 +77,20 @@ export const runtimeConfig = {
   },
   get approvalTimeoutHours(): number {
     return dbInt("cfg:approval_timeout_hours", 1, 240) ?? config.approvalTimeoutHours;
+  },
+
+  // ---- Kiểm duyệt real-time theo từ khoá ----
+
+  /** Bật/tắt toàn bộ tính năng lọc từ khoá. Mặc định TẮT (an toàn). */
+  get moderationEnabled(): boolean {
+    return dbBool("cfg:moderation_enabled") ?? false;
+  },
+  /** Hành động khi dính từ khoá. Mặc định xoá tin + ban (kick + chặn tham gia lại). */
+  get moderationAction(): ModerationAction {
+    return getBotState("cfg:moderation_action") === "delete_only" ? "delete_only" : "delete_and_ban";
+  },
+  /** Danh sách từ khoá cấm (đã chuẩn hoá). */
+  get blacklistWords(): string[] {
+    return readBlacklistWords();
   },
 };

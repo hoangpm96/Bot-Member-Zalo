@@ -20,6 +20,7 @@
     "install-cron": "bash scripts/install-cron.sh",
     "setup-vps": "bash scripts/setup-vps.sh",
     "validate-env": "bash scripts/validate-env.sh",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

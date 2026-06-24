@@ -122,3 +122,27 @@ CREATE TABLE IF NOT EXISTS bot_state (
   value      TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+-- Lịch sử kiểm duyệt real-time: tin nhắn dính từ khoá cấm → xoá tin + ban người gửi.
+-- Append-only (mỗi lần xử lý 1 row). Lưu cả khi DRY_RUN để soi lại bot "sẽ" làm gì.
+-- action: 'delete_only' | 'delete_and_ban' (ban = kick khỏi group + chặn tham gia lại).
+-- deleted/kicked/blocked: 1 nếu bước đó thực sự chạy thành công (0 khi dry-run hoặc lỗi).
+CREATE TABLE IF NOT EXISTS moderation_actions (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id      TEXT NOT NULL,
+  message_id     TEXT NOT NULL DEFAULT '',
+  zalo_user_id   TEXT NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  matched_word   TEXT NOT NULL,
+  text           TEXT NOT NULL DEFAULT '',
+  action         TEXT NOT NULL,
+  dry_run        INTEGER NOT NULL DEFAULT 0,
+  deleted        INTEGER NOT NULL DEFAULT 0,
+  kicked         INTEGER NOT NULL DEFAULT 0,
+  blocked        INTEGER NOT NULL DEFAULT 0,
+  error          TEXT,
+  created_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_moderation_created ON moderation_actions(created_at);
+CREATE INDEX IF NOT EXISTS idx_moderation_user ON moderation_actions(zalo_user_id);
