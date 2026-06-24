@@ -2,8 +2,10 @@ import { PageHeader, EmptyState } from "@/components/ui";
 import { dbExists, listActiveMemberOptions } from "@/lib/db";
 import { readConfig } from "@/lib/config";
 import { readVip } from "@/lib/vip";
+import { readModerationConfig } from "@/lib/blacklist";
 import { ConfigForm } from "./config-form";
 import { VipForm } from "./vip-form";
+import { BlacklistForm } from "./blacklist-form";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +22,13 @@ export default function SettingsPage() {
   const config = readConfig();
   const vip = readVip();
   const members = listActiveMemberOptions();
+  const moderation = readModerationConfig();
 
   return (
     <div className="flex flex-col gap-8">
       <PageHeader title="Cấu hình" desc="Chỉnh tham số dọn dẹp và danh sách VIP. Bot đọc lại ở kỳ kế tiếp." />
       <ConfigForm initial={config} />
+      <BlacklistForm initial={moderation} />
       <VipForm initial={vip} members={members} />
     </div>
   );

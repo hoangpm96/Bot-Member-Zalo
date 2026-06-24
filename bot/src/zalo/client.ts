@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Zalo, LoginQRCallbackEventType } from "zca-js";
+import { Zalo, LoginQRCallbackEventType, ThreadType } from "zca-js";
 import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
 
@@ -462,4 +462,56 @@ export async function removeGroupMember(api: ZaloApi, groupId: string, memberId:
     "zca-js runtime không có method xoá member được hỗ trợ " +
       `(đã thử: ${candidates.join(", ")})`,
   );
+}
+
+/**
+ * Thông tin cần để THU HỒI 1 tin nhắn group (xoá cho mọi người). Lấy từ payload listener:
+ * data.msgId / data.cliMsgId / data.uidFrom + threadId.
+ */
+export interface DeletableMessage {
+  threadId: string;
+  msgId: string;
+  cliMsgId: string;
+  uidFrom: string;
+}
+
+/**
+ * Thu hồi (xoá) tin nhắn trong group CHO MỌI NGƯỜI. zca-js: deleteMessage(dest, onlyMe).
+ * onlyMe=false → xoá phía mọi người (cần quyền admin/co-admin với tin của người khác).
+ * Bot là co-admin nên xoá được tin thành viên thường. Wrapper kiểm tra đủ field trước khi gọi.
+ */
+export async function deleteGroupMessage(api: ZaloApi, msg: DeletableMessage): Promise<void> {
+  if (typeof api.deleteMessage !== "function") {
+    throw new Error("zca-js runtime không có api.deleteMessage");
+  }
+  if (!msg.msgId || !msg.cliMsgId || !msg.uidFrom) {
+    throw new Error(
+      `Thiếu trường để xoá tin (msgId/cliMsgId/uidFrom). ` +
+        `Có: msgId=${msg.msgId || "-"}, cliMsgId=${msg.cliMsgId || "-"}, uidFrom=${msg.uidFrom || "-"}.`,
+    );
+  }
+  await api.deleteMessage(
+    {
+      // BẮT BUỘC type=Group: deleteMessage mặc định type=User → chọn endpoint chat cá nhân
+      // và guard "Can't delete message for everyone in a private chat" sẽ ném lỗi với onlyMe=false.
+      type: ThreadType.Group,
+      data: { msgId: msg.msgId, cliMsgId: msg.cliMsgId, uidFrom: msg.uidFrom },
+      threadId: msg.threadId,
+    },
+    false, // onlyMe=false → xoá cho mọi người, không chỉ phía bot
+  );
+}
+
+/**
+ * BAN khỏi group = chặn người này tham gia lại (tương đương checkbox "chặn người này
+ * tham gia lại" khi xoá thành viên trong app Zalo). zca-js: addGroupBlockedMember → endpoint
+ * group/blockedmems/add. Đây là bước RIÊNG sau removeGroupMember (kick chỉ đuổi ra, không
+ * chặn vào lại). Nếu runtime không có method này, dừng rõ để khỏi tưởng đã chặn.
+ */
+export async function blockGroupMember(api: ZaloApi, groupId: string, memberId: string): Promise<void> {
+  const fn = api?.addGroupBlockedMember;
+  if (typeof fn !== "function") {
+    throw new Error("zca-js runtime không có api.addGroupBlockedMember (không chặn được tham gia lại)");
+  }
+  await fn.call(api, memberId, groupId);
 }

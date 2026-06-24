@@ -164,6 +164,12 @@ trả lỗi 503 rõ ràng thay vì báo thành công giả.
    Định kỳ trong listener:
    • mỗi 6h  → syncVotesOnce() → fetchGroupPollVotes ─▶ logInteraction(type='vote')
    • heartbeat (LISTENER_HEARTBEAT_MS) → log socket còn sống
+
+   Kiểm duyệt từ khoá cấm (nếu bật trong /settings):
+   • message có text ─▶ moderateMessage() ─▶ tìm từ cấm (nguyên từ, không phân biệt
+     hoa/thường, giữ dấu) ─▶ xoá tin (deleteMessage, onlyMe=false)
+     └─ action=delete_and_ban ─▶ removeUserFromGroup + addGroupBlockedMember (chặn vào lại)
+     └─ miễn trừ owner/admin + VIP; tôn trọng DRY_RUN; báo Telegram; ghi moderation_actions
 ```
 
 Lọc & dedupe:
@@ -182,6 +188,16 @@ Lọc & dedupe:
 - **Vote không đến qua event.** `GroupEventType` không có poll/vote. ⇒ phải **chủ
   động đọc** poll mỗi 6h (`fetchGroupPollVotes`). Bù lại đọc được cả voter cũ vì
   poll lưu trạng thái trên server. Poll ẩn danh thì không đọc được voter.
+
+**Kiểm duyệt từ khoá (delete + ban):**
+
+- Xoá tin của người khác và kick/chặn cần bot là **admin/co-admin** của nhóm. Thiếu
+  quyền → Zalo trả lỗi (xoá đã xong vẫn giữ, chỉ báo lỗi bước kick — không undo được).
+- "Ban" = `removeUserFromGroup` (kick) **+** `addGroupBlockedMember` (thêm vào blocked
+  list của nhóm = "chặn người này tham gia lại"). Đây là 2 bước riêng; chặn lỗi không
+  huỷ việc đã kick.
+- Khớp **nguyên từ**, không phân biệt hoa/thường, **giữ dấu** tiếng Việt (`moderation.ts`,
+  có unit test). Cụm nhiều từ khớp khi xuất hiện đầy đủ.
 
 ---
 
@@ -355,8 +371,15 @@ khởi động. Đầy đủ cột xem [`bot/src/db/schema.sql`](bot/src/db/sche
      | cancelled
      | skipped | failed
 
+  moderation_actions (append-only): mỗi lần xoá tin/ban vì dính từ khoá cấm
+   • matched_word, text, action (delete_only|delete_and_ban)
+   • dry_run, deleted, kicked, blocked, error
+
   bot_state (key-value): warmup_started_at, first_cycle_skipped,
-                         approval_sent_at:<run>, cleanup_kick_lock, …
+                         approval_sent_at:<run>, cleanup_kick_lock,
+                         cfg:* (target/warmup/throttle…),
+                         cfg:moderation_enabled, cfg:moderation_action,
+                         cfg:blacklist_words (JSON), …
 ```
 
 Vì sao plan lưu bền (`cleanup_plan_items`): approval/timeout/retry có thể xảy ra
@@ -373,7 +396,7 @@ trong DB chứ không phải bộ nhớ, nếu không sẽ mất sau restart.
 | `/members`   | bảng `members` + thống kê tương tác     | —                               |
 | `/messages`  | bảng `group_messages` (+ export)        | —                               |
 | `/history`   | `scan_runs`, `removals`                 | —                               |
-| `/settings`  | cấu hình runtime + `vip-list.json`      | cấu hình + VIP list             |
+| `/settings`  | cấu hình runtime + `vip-list.json` + lọc từ khoá | cấu hình + VIP + blacklist |
 
 Web đọc DB qua `WEB_DB_PATH`, QR/marker qua `WEB_QR_DIR`, VIP qua `WEB_VIP_PATH` —
 PM2 đặt sẵn các biến này trỏ tuyệt đối vào `bot/data/` (xem

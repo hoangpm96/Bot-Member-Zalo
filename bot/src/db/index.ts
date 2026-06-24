@@ -425,6 +425,52 @@ export function recordRemoval(input: {
     .run(input);
 }
 
+// ---- Moderation (real-time keyword filter) ----
+
+export type ModerationActionType = "delete_only" | "delete_and_ban";
+
+/** Ghi 1 lần kiểm duyệt (append-only). Lưu cả khi dry-run để soi lại bot "sẽ" làm gì. */
+export function recordModerationAction(input: {
+  threadId: string;
+  messageId: string;
+  zaloUserId: string;
+  displayName: string;
+  matchedWord: string;
+  text: string;
+  action: ModerationActionType;
+  dryRun: boolean;
+  deleted: boolean;
+  kicked: boolean;
+  blocked: boolean;
+  error?: string | null;
+  now: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO moderation_actions
+         (thread_id, message_id, zalo_user_id, display_name, matched_word, text,
+          action, dry_run, deleted, kicked, blocked, error, created_at)
+       VALUES
+         (@threadId, @messageId, @zaloUserId, @displayName, @matchedWord, @text,
+          @action, @dryRun, @deleted, @kicked, @blocked, @error, @now)`,
+    )
+    .run({
+      threadId: input.threadId,
+      messageId: input.messageId,
+      zaloUserId: input.zaloUserId,
+      displayName: input.displayName,
+      matchedWord: input.matchedWord,
+      text: input.text,
+      action: input.action,
+      dryRun: input.dryRun ? 1 : 0,
+      deleted: input.deleted ? 1 : 0,
+      kicked: input.kicked ? 1 : 0,
+      blocked: input.blocked ? 1 : 0,
+      error: input.error ?? null,
+      now: input.now,
+    });
+}
+
 // ---- bot_state (key-value) ----
 
 export function getBotState(key: string): string | undefined {
