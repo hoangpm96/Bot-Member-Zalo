@@ -131,8 +131,10 @@ ln -sfn "$release_dir" "$CURRENT_DIR"
 switched_current=1
 
 echo "Reloading PM2"
-# Ensure legacy PM2 metadata (old cwd/script) does not survive the migration to release-based deploys.
-pm2 delete zalo-bot >/dev/null 2>&1 || true
+# startOrReload chỉ *reload* app đã tồn tại (giữ nguyên cwd cũ → vẫn chạy release cũ),
+# chỉ *start mới* khi app chưa có (đọc cwd mới từ ecosystem). Nên phải delete cả hai app
+# trước, để chúng start lại và trỏ đúng vào $CURRENT_DIR của release vừa switch.
+pm2 delete zalo-bot zalo-web >/dev/null 2>&1 || true
 pm2 startOrReload "$CURRENT_DIR/bot/ecosystem.config.cjs" --update-env
 pm2 save
 
