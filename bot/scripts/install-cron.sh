@@ -15,6 +15,11 @@ if [ ! -f "$BOT_DIR/dist/index.js" ]; then
   echo "Run 'npm run build' before installing cron jobs."
   exit 1
 fi
+if [ ! -f "$BOT_DIR/dist/db/schema.sql" ]; then
+  echo "Missing bot schema build output: $BOT_DIR/dist/db/schema.sql"
+  echo "Run 'npm run build' before installing cron jobs."
+  exit 1
+fi
 
 existing_cron="$(mktemp)"
 new_cron="$(mktemp)"

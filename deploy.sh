@@ -131,6 +131,8 @@ ln -sfn "$release_dir" "$CURRENT_DIR"
 switched_current=1
 
 echo "Reloading PM2"
+# Ensure legacy PM2 metadata (old cwd/script) does not survive the migration to release-based deploys.
+pm2 delete zalo-bot >/dev/null 2>&1 || true
 pm2 startOrReload "$CURRENT_DIR/bot/ecosystem.config.cjs" --update-env
 pm2 save
 

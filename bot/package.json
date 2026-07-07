@@ -8,7 +8,7 @@
     "node": ">=20 <21"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && mkdir -p dist/db && cp src/db/schema.sql dist/db/schema.sql",
     "start": "node dist/index.js start",
     "dev": "tsx src/index.ts start",
     "list-groups": "tsx src/index.ts list-groups",
