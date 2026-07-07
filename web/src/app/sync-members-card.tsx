@@ -40,9 +40,11 @@ function statusLabel(status: MemberSyncRun["status"]): string {
 export function SyncMembersCard({
   initialLatest,
   initialPending,
+  botReady,
 }: {
   initialLatest: MemberSyncRun | null;
   initialPending: boolean;
+  botReady: boolean;
 }) {
   const [latest, setLatest] = useState<MemberSyncRun | null>(initialLatest);
   const [pending, setPending] = useState(initialPending);
@@ -98,7 +100,7 @@ export function SyncMembersCard({
             )}
           </div>
         </div>
-        <Button onClick={() => void requestSync()} disabled={busy || pending || latest?.status === "running"} className="gap-2">
+        <Button onClick={() => void requestSync()} disabled={!botReady || busy || pending || latest?.status === "running"} className="gap-2">
           <RefreshCw size={16} className={busy || pending || latest?.status === "running" ? "animate-spin" : ""} />
           Sync ngay
         </Button>
@@ -113,6 +115,7 @@ export function SyncMembersCard({
         </div>
       ) : null}
 
+      {!botReady ? <p className="mt-3 text-xs text-[var(--color-danger)]">Bot heartbeat đang stale, không gửi sync.</p> : null}
       {message ? <p className="mt-3 text-xs text-[var(--color-muted)]">{message}</p> : null}
       {latest?.error ? <p className="mt-3 text-xs text-[var(--color-danger)]">{latest.error}</p> : null}
     </Card>

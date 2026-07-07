@@ -17,6 +17,7 @@ import {
   markCleanupPlanItem,
   markCleanupPlanItemsForRun,
   markMemberLeft,
+  recordBotError,
   recordMemberEvent,
   recordRemoval,
   releaseLock,
@@ -440,6 +441,12 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
       syncedCount = sync.memberCount;
     } catch (e) {
       const note = `E-sync-before-kick: không sync được member trước khi kick, đã dừng để tránh xoá sai: ${String(e)}`;
+      recordBotError({
+        source: "monthly-cleanup",
+        code: "sync_before_kick_failed",
+        message: note,
+        detail: e instanceof Error ? e.stack : null,
+      });
       finishScanRun({
         id: scanRunId,
         finishedAt: Date.now(),
@@ -535,6 +542,12 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
       } catch (e) {
         markCleanupPlanItem({ id: c.id, status: "failed", error: String(e), now: Date.now() });
         const note = `E-cleanup-001: đã xoá ${actual}/${rows.length}, lỗi: ${String(e)}`;
+        recordBotError({
+          source: "monthly-cleanup",
+          code: "kick_failed",
+          message: note,
+          detail: e instanceof Error ? e.stack : null,
+        });
         finishScanRun({
           id: scanRunId,
           finishedAt: Date.now(),

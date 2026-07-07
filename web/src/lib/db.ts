@@ -232,6 +232,21 @@ export interface PermissionCheckStatus {
   error?: string;
 }
 
+export interface BotErrorRow {
+  id: number;
+  source: string;
+  code: string;
+  message: string;
+  detail: string | null;
+  created_at: number;
+}
+
+export interface SchemaMigrationRow {
+  version: string;
+  applied_at: number;
+  note: string | null;
+}
+
 export interface GroupMediaEventRow {
   id: number;
   thread_id: string;
@@ -529,12 +544,19 @@ export function setCleanupPlanItemStatus(input: {
   id: number;
   status: "planned" | "skipped";
   error?: string | null;
-}): void {
-  getDb()
+}): boolean {
+  const res = getDb()
     .prepare(
       `UPDATE cleanup_plan_items
        SET status = @status, error = @error, updated_at = @now
-       WHERE id = @id AND status IN ('planned', 'skipped', 'failed')`,
+       WHERE id = @id
+         AND status IN ('planned', 'skipped', 'failed')
+         AND EXISTS (
+           SELECT 1
+           FROM scan_runs r
+           WHERE r.id = cleanup_plan_items.scan_run_id
+             AND r.status IN ('planned', 'pending_approval', 'failed')
+         )`,
     )
     .run({
       id: input.id,
@@ -542,6 +564,7 @@ export function setCleanupPlanItemStatus(input: {
       error: input.status === "skipped" ? input.error ?? "Admin bỏ chọn trên dashboard." : null,
       now: Date.now(),
     });
+  return res.changes > 0;
 }
 
 function readJsonState<T>(key: string): T | null {
@@ -560,6 +583,34 @@ export function getBotHealth(): BotHealth | null {
 
 export function getPermissionCheckStatus(): PermissionCheckStatus | null {
   return readJsonState<PermissionCheckStatus>("permission_check");
+}
+
+export function isBotHealthFresh(health: BotHealth | null, maxAgeMs = 2 * 60 * 1000): boolean {
+  return Boolean(health?.heartbeatAt && Date.now() - health.heartbeatAt <= maxAgeMs);
+}
+
+export function listBotErrors(limit = 100): BotErrorRow[] {
+  if (!tableExists("bot_errors")) return [];
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM bot_errors
+       ORDER BY created_at DESC, id DESC
+       LIMIT @limit`,
+    )
+    .all({ limit: Math.min(Math.max(limit, 1), 500) }) as BotErrorRow[];
+}
+
+export function listSchemaMigrations(limit = 20): SchemaMigrationRow[] {
+  if (!tableExists("schema_migrations")) return [];
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM schema_migrations
+       ORDER BY applied_at DESC
+       LIMIT @limit`,
+    )
+    .all({ limit: Math.min(Math.max(limit, 1), 100) }) as SchemaMigrationRow[];
 }
 
 export function getLatestMemberSyncRun(): MemberSyncRunRow | undefined {

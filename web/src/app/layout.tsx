@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare, UserRoundCheck, UserMinus, ListChecks } from "lucide-react";
+import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare, UserRoundCheck, UserMinus, ListChecks, AlertTriangle } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/events", label: "Sự kiện TV", shortLabel: "Sự kiện", icon: UserRoundCheck },
   { href: "/messages", label: "Tin nhắn", shortLabel: "Tin nhắn", icon: MessageSquare },
   { href: "/history", label: "Lịch sử dọn", shortLabel: "Lịch sử", icon: History },
+  { href: "/errors", label: "Lỗi", shortLabel: "Lỗi", icon: AlertTriangle },
   { href: "/settings", label: "Cấu hình", shortLabel: "Cấu hình", icon: Settings },
   { href: "/login", label: "Đăng nhập", shortLabel: "Đăng nhập", icon: LogIn },
 ];

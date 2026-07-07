@@ -1,0 +1,91 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Bot install
+        working-directory: bot
+        run: npm ci
+
+      - name: Bot rebuild native deps
+        working-directory: bot
+        run: npm rebuild better-sqlite3
+
+      - name: Bot test
+        working-directory: bot
+        run: npm test
+
+      - name: Bot typecheck
+        working-directory: bot
+        run: npm run typecheck
+
+      - name: Bot build
+        working-directory: bot
+        run: npm run build
+
+      - name: Web install
+        working-directory: web
+        run: npm ci
+
+      - name: Web rebuild native deps
+        working-directory: web
+        run: npm rebuild better-sqlite3
+
+      - name: Web typecheck
+        working-directory: web
+        run: npm run typecheck
+
+      - name: Web build
+        working-directory: web
+        run: npm run build
+
+  deploy:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Deploy over SSH
+        env:
+          PROD_SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          PROD_SSH_PORT: ${{ secrets.PROD_SSH_PORT }}
+          PROD_SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          : "${PROD_SSH_HOST:?Missing secret PROD_SSH_HOST}"
+          : "${PROD_SSH_USER:?Missing secret PROD_SSH_USER}"
+          : "${PROD_SSH_KEY:?Missing secret PROD_SSH_KEY}"
+
+          port="${PROD_SSH_PORT:-22}"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/bot_member_zalo_deploy
+          chmod 600 ~/.ssh/bot_member_zalo_deploy
+          ssh-keyscan -p "$port" "$PROD_SSH_HOST" >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/bot_member_zalo_deploy \
+            -p "$port" \
+            -o IdentitiesOnly=yes \
+            "$PROD_SSH_USER@$PROD_SSH_HOST" \
+            'cd /var/www/Bot-Member-Zalo && git fetch origin main && git checkout main && git pull --ff-only origin main && bash deploy.sh'

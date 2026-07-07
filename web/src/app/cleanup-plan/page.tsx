@@ -1,5 +1,5 @@
 import { Card, CardTitle, EmptyState, PageHeader, RunStatusBadge, Stat } from "@/components/ui";
-import { dbExists, getLatestPlanRun, listCleanupPlanItems } from "@/lib/db";
+import { dbExists, getBotHealth, getLatestPlanRun, isBotHealthFresh, listCleanupPlanItems } from "@/lib/db";
 import { fmtDateTime } from "@/lib/utils";
 import { CleanupPlanTable } from "./cleanup-plan-table";
 
@@ -19,6 +19,9 @@ export default function CleanupPlanPage() {
   const items = run ? listCleanupPlanItems(run.id) : [];
   const planned = items.filter((item) => item.status === "planned" || item.status === "failed").length;
   const skipped = items.filter((item) => item.status === "skipped").length;
+  const botReady = isBotHealthFresh(getBotHealth());
+  const runEditable = run ? ["planned", "pending_approval", "failed"].includes(run.status) : false;
+  const canEdit = botReady && runEditable;
 
   return (
     <div>
@@ -37,8 +40,13 @@ export default function CleanupPlanPage() {
 
           <Card className="mt-6">
             <CardTitle>Danh sách plan ({items.length})</CardTitle>
+            {!botReady ? (
+              <p className="mt-2 text-sm text-[var(--color-danger)]">Bot heartbeat đang stale, tạm khóa thao tác.</p>
+            ) : !runEditable ? (
+              <p className="mt-2 text-sm text-[var(--color-muted)]">Kỳ này đã qua trạng thái chỉnh sửa.</p>
+            ) : null}
             <div className="mt-3">
-              <CleanupPlanTable initialItems={items} />
+              <CleanupPlanTable initialItems={items} canEdit={canEdit} />
             </div>
           </Card>
         </>

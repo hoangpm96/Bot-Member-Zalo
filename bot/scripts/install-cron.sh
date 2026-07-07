@@ -6,9 +6,15 @@ LOG_DIR="$BOT_DIR/data"
 MARKER_BEGIN="# BEGIN bot-member-zalo managed jobs"
 MARKER_END="# END bot-member-zalo managed jobs"
 NODE_BIN_DIR="$(dirname "$(command -v node)")"
-NPM_BIN="$(command -v npm)"
+NODE_BIN="$(command -v node)"
 
 mkdir -p "$LOG_DIR"
+
+if [ ! -f "$BOT_DIR/dist/index.js" ]; then
+  echo "Missing bot build output: $BOT_DIR/dist/index.js"
+  echo "Run 'npm run build' before installing cron jobs."
+  exit 1
+fi
 
 existing_cron="$(mktemp)"
 new_cron="$(mktemp)"
@@ -30,16 +36,19 @@ PATH=$NODE_BIN_DIR:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 CRON_TZ=Asia/Ho_Chi_Minh
 
 # Telegram approval/cancel/retry/timeout. Required for approve buttons to work.
-* * * * * cd "$BOT_DIR" && "$NPM_BIN" run telegram-poll >> "$LOG_DIR/telegram-poll.log" 2>&1
+* * * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" telegram-poll >> "$LOG_DIR/telegram-poll.log" 2>&1
+
+# Bot health alert. Sends Telegram when heartbeat is stale and sends recovery once.
+*/5 * * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" health-check >> "$LOG_DIR/health-check.log" 2>&1
 
 # Poll voter backup sync. Listener also runs this every 6h; this cron is idempotent fallback.
-17 */6 * * * cd "$BOT_DIR" && "$NPM_BIN" run sync-votes >> "$LOG_DIR/sync-votes.log" 2>&1
+17 */6 * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-votes >> "$LOG_DIR/sync-votes.log" 2>&1
 
 # Monthly group warning. Sends only because DRY_RUN=0 and SEND_GROUP_WARNINGS=1 are set here.
-0 9 25 * * cd "$BOT_DIR" && DRY_RUN=0 SEND_GROUP_WARNINGS=1 "$NPM_BIN" run cleanup-warn >> "$LOG_DIR/cleanup-warn.log" 2>&1
+0 9 25 * * cd "$BOT_DIR" && DRY_RUN=0 SEND_GROUP_WARNINGS=1 "$NODE_BIN" "$BOT_DIR/dist/index.js" cleanup-warn >> "$LOG_DIR/cleanup-warn.log" 2>&1
 
 # Monthly cleanup plan. Sends Telegram approval; actual remove happens after approval via telegram-poll.
-0 9 3 * * cd "$BOT_DIR" && DRY_RUN=0 "$NPM_BIN" run monthly-cleanup >> "$LOG_DIR/monthly-cleanup.log" 2>&1
+0 9 3 * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" monthly-cleanup >> "$LOG_DIR/monthly-cleanup.log" 2>&1
 $MARKER_END
 EOF
 

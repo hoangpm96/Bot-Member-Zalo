@@ -13,7 +13,7 @@ module.exports = {
   apps: [
     {
       name: "zalo-bot",
-      script: "npm",
+      script: "dist/index.js",
       args: "start",
       cwd: __dirname,
       autorestart: true,

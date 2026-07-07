@@ -5,15 +5,18 @@
   "description": "Bot quét tương tác group Zalo & dọn bớt thành viên ít hoạt động định kỳ (Milestone 1: thu thập dữ liệu)",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=20 <21"
   },
   "scripts": {
-    "start": "tsx src/index.ts start",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js start",
+    "dev": "tsx src/index.ts start",
     "list-groups": "tsx src/index.ts list-groups",
     "export-members": "tsx src/index.ts export-members",
     "import-interactions": "tsx src/index.ts import-interactions",
     "sync-members": "tsx src/index.ts sync-members",
     "check-permissions": "tsx src/index.ts check-permissions",
+    "health-check": "tsx src/index.ts health-check",
     "sync-votes": "tsx src/index.ts sync-votes",
     "telegram-test": "tsx src/index.ts telegram-test",
     "cleanup-warn": "tsx src/index.ts cleanup-warn",
@@ -22,7 +25,7 @@
     "install-cron": "bash scripts/install-cron.sh",
     "setup-vps": "bash scripts/setup-vps.sh",
     "validate-env": "bash scripts/validate-env.sh",
-    "test": "node --import tsx --test src/**/*.test.ts",
+    "test": "node --import tsx --test $(find src -name '*.test.ts' -print)",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

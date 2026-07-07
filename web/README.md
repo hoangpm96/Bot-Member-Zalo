@@ -41,7 +41,7 @@ WEB_VIP_PATH=/đường-dẫn/vip-list.json   # mặc định ../bot/data/vip-li
 - `src/lib/config-meta.ts` — metadata config **client-safe** (dùng chung client form + server).
 - `src/lib/config.ts` — đọc/ghi config vào `bot_state` (server-only).
 - `src/lib/vip.ts` — đọc/ghi `vip-list.json`.
-- `src/app/*` — dashboard health/sync/permission, members, candidates + draft plan, cleanup-plan per item, events filter/export, messages/media, history, settings, login + API routes.
+- `src/app/*` — dashboard health/sync/permission, members, candidates + draft plan, cleanup-plan per item, events filter/export, messages/media, errors/schema, history, settings, login + API routes.
 
 ## Chưa làm
 

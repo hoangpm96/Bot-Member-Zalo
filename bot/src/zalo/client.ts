@@ -220,10 +220,17 @@ export async function login(): Promise<ZaloApi> {
         console.log(`[zalo] ✅ Đã quét QR (${event?.data?.display_name ?? ""}). Đang hoàn tất...`);
         writeLoginStatus("scanned", { displayName: event?.data?.display_name ?? "" });
         break;
-      case LoginQRCallbackEventType.QRCodeExpired:
+      case LoginQRCallbackEventType.QRCodeExpired: {
         console.warn("[zalo] ⚠️  Mã QR hết hạn — đang tạo mã mới...");
         writeLoginStatus("expired");
+        const retry = event?.actions?.retry;
+        if (typeof retry === "function") {
+          retry();
+        } else {
+          console.warn("[zalo] zca-js không cung cấp retry action; hãy yêu cầu đăng nhập lại từ web /login.");
+        }
         break;
+      }
       case LoginQRCallbackEventType.QRCodeDeclined:
         console.warn("[zalo] ❌ Đăng nhập bị từ chối trên điện thoại.");
         writeLoginStatus("declined");
@@ -286,6 +293,13 @@ export async function getGroupSnapshot(
   const info = await api.getGroupInfo(groupId);
   const g = info?.gridInfoMap?.[groupId] ?? info?.[groupId] ?? info;
 
+  if (!g || (typeof g === "object" && Object.keys(g).length === 0)) {
+    throw new Error(
+      `Zalo không trả thông tin cho GROUP_ID=${groupId}. ` +
+        "Kiểm tra lại GROUP_ID bằng `npm run list-groups` với đúng tài khoản bot.",
+    );
+  }
+
   const creatorId: string = g?.creatorId ?? "";
   const adminIds: string[] = Array.isArray(g?.adminIds) ? g.adminIds : [];
   const name = String(g?.name ?? "");
@@ -312,6 +326,12 @@ export async function getGroupSnapshot(
     .map((x) => String(x).split("_")[0] ?? "")
     .filter((id) => id !== "");
   if (ids.length === 0) {
+    if (!name && totalMember === 0 && currentMembers.length === 0) {
+      throw new Error(
+        `Zalo trả snapshot group rỗng cho GROUP_ID=${groupId}. ` +
+          "Bỏ qua sync để tránh đánh inactive nhầm toàn bộ member.",
+      );
+    }
     return { groupId, name, totalMember: totalMember || currentMembers.length, members: currentMembers };
   }
 

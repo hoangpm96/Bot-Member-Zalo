@@ -139,6 +139,7 @@ npm run install-cron
 Script này cài 4 job:
 
 - Mỗi phút: `telegram-poll` nhận nút Duyệt/Huỷ, `/retry`, timeout.
+- Mỗi 5 phút: `health-check` báo Telegram nếu heartbeat bot stale, và báo hồi phục một lần.
 - Mỗi 6 giờ: `sync-votes` đồng bộ voter trong poll, idempotent backup cho listener.
 - 09:00 ngày 25 hằng tháng: gửi cảnh báo group.
 - 09:00 ngày 3 hằng tháng: lập danh sách và gửi Telegram approval.
@@ -150,6 +151,7 @@ Kiểm tra:
 ```bash
 crontab -l
 tail -f data/telegram-poll.log
+tail -f data/health-check.log
 tail -f data/sync-votes.log
 ```
 
@@ -174,14 +176,19 @@ tail -f data/monthly-cleanup.log
 
 ## 7. Update code trên VPS
 
+CI/CD dùng root [`deploy.sh`](../deploy.sh). Runtime data không nằm trong release:
+
+- checkout gốc: `/var/www/Bot-Member-Zalo`
+- symlink release hiện tại: `/var/www/Bot-Member-Zalo-current`
+- release history: `/var/www/Bot-Member-Zalo-releases`
+- DB/session/QR/log runtime: `/var/lib/bot-member-zalo`
+
+Deploy thủ công nếu cần:
+
 ```bash
-git pull
-npm install
-npm rebuild better-sqlite3
-npm --prefix ../web install
-npm --prefix ../web run build
-pm2 startOrReload ecosystem.config.cjs
-npm run install-cron
+cd /var/www/Bot-Member-Zalo
+bash deploy.sh
 ```
 
-Chạy lại `npm run install-cron` sau update là an toàn; script tự thay block cron cũ, không nhân đôi job.
+`deploy.sh` tự `npm ci`, rebuild `better-sqlite3`, test/typecheck/build, đổi symlink
+current, reload PM2, cài lại cron, health check `/login`, rollback nếu deploy lỗi.

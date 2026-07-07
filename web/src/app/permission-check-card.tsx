@@ -25,9 +25,11 @@ interface PermissionResponse {
 export function PermissionCheckCard({
   initialLatest,
   initialPending,
+  botReady,
 }: {
   initialLatest: PermissionStatus | null;
   initialPending: boolean;
+  botReady: boolean;
 }) {
   const [latest, setLatest] = useState(initialLatest);
   const [pending, setPending] = useState(initialPending);
@@ -85,7 +87,7 @@ export function PermissionCheckCard({
             )}
           </div>
         </div>
-        <Button onClick={() => void requestCheck()} disabled={pending} className="gap-2">
+        <Button onClick={() => void requestCheck()} disabled={!botReady || pending} className="gap-2">
           <ShieldCheck size={16} />
           Check quyền
         </Button>
@@ -106,6 +108,7 @@ export function PermissionCheckCard({
         </ul>
       ) : null}
       {latest?.error ? <p className="mt-3 text-xs text-[var(--color-danger)]">{latest.error}</p> : null}
+      {!botReady ? <p className="mt-3 text-xs text-[var(--color-danger)]">Bot heartbeat đang stale, không gửi check quyền.</p> : null}
       {message ? <p className="mt-3 text-xs text-[var(--color-muted)]">{message}</p> : null}
     </Card>
   );

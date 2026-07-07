@@ -5,6 +5,7 @@ import {
   getMember,
   getMemberStats,
   markMemberLeft,
+  recordBotError,
   recordMemberEvent,
   upsertMember,
   type MemberEventSource,
@@ -52,6 +53,12 @@ export async function syncGroupMembers(
     const reportedCount = Number.isFinite(snap.totalMember) ? snap.totalMember : 0;
     const snapshotCount = snap.members.length;
 
+    if (reportedCount === 0 && snapshotCount === 0 && !snap.name.trim()) {
+      throw new Error(
+        `Zalo trả snapshot group rỗng cho GROUP_ID=${config.groupId}; ` +
+          "bỏ qua sync để tránh đánh inactive nhầm toàn bộ member.",
+      );
+    }
     if (reportedCount > 0 && snapshotCount === 0) {
       throw new Error(
         `Zalo trả snapshot member rỗng trong khi totalMember=${reportedCount}; bỏ qua sync để tránh lệch DB.`,
@@ -133,6 +140,13 @@ export async function syncGroupMembers(
     });
     return result;
   } catch (e) {
+    recordBotError({
+      source: "member-sync",
+      code: "sync_failed",
+      message: String(e),
+      detail: e instanceof Error ? e.stack : null,
+      now: Date.now(),
+    });
     finishMemberSyncRun({
       id: runId,
       finishedAt: Date.now(),

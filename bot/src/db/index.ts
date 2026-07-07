@@ -10,6 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SCHEMA_VERSION = "2026-07-07-ops-dashboard-v2";
 
 let db: Database.Database | null = null;
 
@@ -23,6 +24,14 @@ export function getDb(): Database.Database {
 
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  db.prepare(
+    `INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)
+     VALUES (@version, @appliedAt, @note)`,
+  ).run({
+    version: SCHEMA_VERSION,
+    appliedAt: Date.now(),
+    note: "Member sync, bot health, cleanup operations dashboard, media metadata, bot error log.",
+  });
   return db;
 }
 
@@ -78,6 +87,15 @@ export interface MemberSyncRunRow {
   upserted: number | null;
   marked_left: number | null;
   error: string | null;
+}
+
+export interface BotErrorRow {
+  id: number;
+  source: string;
+  code: string;
+  message: string;
+  detail: string | null;
+  created_at: number;
 }
 
 export interface ScanRunRow {
@@ -179,6 +197,29 @@ export function getMember(zaloUserId: string): MemberRow | undefined {
   return getDb()
     .prepare(`SELECT * FROM members WHERE zalo_user_id = @id`)
     .get({ id: zaloUserId }) as MemberRow | undefined;
+}
+
+// ---- Ops errors ----
+
+export function recordBotError(input: {
+  source: string;
+  code?: string;
+  message: string;
+  detail?: string | null;
+  now?: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO bot_errors (source, code, message, detail, created_at)
+       VALUES (@source, @code, @message, @detail, @now)`,
+    )
+    .run({
+      source: input.source,
+      code: input.code ?? "",
+      message: input.message.slice(0, 1000),
+      detail: input.detail ? input.detail.slice(0, 5000) : null,
+      now: input.now ?? Date.now(),
+    });
 }
 
 // ---- Member sync / audit ----

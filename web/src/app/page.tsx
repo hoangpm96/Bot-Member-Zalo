@@ -12,6 +12,7 @@ import {
   getLatestMemberSyncRun,
   getBotHealth,
   getPermissionCheckStatus,
+  isBotHealthFresh,
 } from "@/lib/db";
 import { readConfig } from "@/lib/config";
 import { CONFIG_DEFAULTS } from "@/lib/config-meta";
@@ -57,6 +58,7 @@ export default function DashboardPage() {
   const latestSync = getLatestMemberSyncRun() ?? null;
   const syncPending = fs.existsSync(memberSyncRequestPath());
   const health = getBotHealth();
+  const botFresh = isBotHealthFresh(health);
   const permission = getPermissionCheckStatus();
   const permissionPending = fs.existsSync(permissionCheckRequestPath());
 
@@ -76,12 +78,12 @@ export default function DashboardPage() {
       </div>
 
       <div className="mt-8">
-        <SyncMembersCard initialLatest={latestSync} initialPending={syncPending} />
+        <SyncMembersCard initialLatest={latestSync} initialPending={syncPending} botReady={botFresh} />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <BotHealthCard health={health} />
-        <PermissionCheckCard initialLatest={permission} initialPending={permissionPending} />
+        <PermissionCheckCard initialLatest={permission} initialPending={permissionPending} botReady={botFresh} />
       </div>
 
       <div className="mt-8">

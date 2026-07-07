@@ -16,18 +16,28 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+node_major="$(node -p 'process.versions.node.split(".")[0]')"
+if [ "$node_major" != "20" ]; then
+  echo "Node.js 20.x is required for this deployment."
+  echo "Current node: $(node -v) ($(command -v node))"
+  echo "Use the repo .nvmrc (20.20.2), then rerun setup."
+  exit 1
+fi
+
 if ! command -v pm2 >/dev/null 2>&1; then
   echo "pm2 is not installed. Installing globally..."
   npm install -g pm2
 fi
 
-npm install
+npm ci
 npm rebuild better-sqlite3
+npm test
 npm run typecheck
+npm run build
 
 if [ -d "$WEB_DIR" ]; then
   cd "$WEB_DIR"
-  npm install
+  npm ci
   npm rebuild better-sqlite3
   npm run typecheck
   npm run build

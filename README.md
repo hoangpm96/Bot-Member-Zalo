@@ -14,6 +14,7 @@ Telegram.
 - Listener 24/7 cho message, reaction, sự kiện thành viên và sync snapshot member định kỳ.
 - Dashboard có nút sync member ngay, trạng thái sync gần nhất, trang ứng viên và audit sự kiện thành viên.
 - Dashboard có Bot health, check quyền bot, duyệt từng item trong cleanup plan và lưu plan nháp.
+- Dashboard có trang lỗi gần đây và schema version; cron `health-check` gửi Telegram khi heartbeat stale.
 - Ghi metadata ảnh/video theo user/thời điểm/số lượng; không lưu file, URL hay nội dung media.
 - Lưu text message, gồm cả self-message; không lưu ảnh, audio hay file.
 - Đồng bộ lượt vote từ poll khi Zalo cho phép đọc voter.
@@ -58,7 +59,7 @@ Chạy bot ở terminal khác:
 
 ```bash
 cd bot
-npm start
+npm run dev
 ```
 
 Mở `http://localhost:3000/login`, bấm **Bắt đầu đăng nhập** và quét QR.
@@ -100,9 +101,24 @@ Trước khi public fork hoặc báo lỗi bảo mật, xem [SECURITY.md](SECURI
 ## Kiểm tra
 
 ```bash
-cd bot && npm run typecheck
+cd bot && npm test && npm run typecheck && npm run build
 cd ../web && npm run typecheck && npm run build
 ```
+
+## CI/CD production
+
+Repo pin Node `20.20.2` bằng `.nvmrc`. CI chạy bot test/typecheck/build và web
+typecheck/build trước khi deploy. Deploy VPS giữ runtime data cố định ở
+`/var/lib/bot-member-zalo`, còn code release nằm dưới
+`/var/www/Bot-Member-Zalo-releases` và symlink current là
+`/var/www/Bot-Member-Zalo-current`.
+
+Yêu cầu GitHub Actions secrets:
+
+- `PROD_SSH_HOST`
+- `PROD_SSH_PORT`
+- `PROD_SSH_USER`
+- `PROD_SSH_KEY`
 
 ## Tài liệu
 

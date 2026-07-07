@@ -55,7 +55,7 @@ cả hai **phải chạy trên cùng máy / cùng volume**.
 
 | Process    | Là gì                 | Làm gì                                                            |
 |------------|-----------------------|------------------------------------------------------------------|
-| `zalo-bot` | Node worker (`npm start` → `runListener`) | Đăng nhập Zalo, lắng nghe message/reaction/event 24/7, ghi DB |
+| `zalo-bot` | Node worker (`node dist/index.js start` → `runListener`) | Đăng nhập Zalo, lắng nghe message/reaction/event 24/7, ghi DB |
 | `zalo-web` | Next.js (`next start`)| Dashboard: login QR, xem member/tin nhắn/lịch sử, sửa cấu hình + VIP |
 | cron jobs  | crontab gọi `npm run …`| Định kỳ: telegram-poll, sync-votes, cảnh báo, lập danh sách dọn |
 
@@ -359,6 +359,9 @@ File: `bot/data/bot.db`. Schema idempotent (`CREATE IF NOT EXISTS`), chạy mỗ
 khởi động. Đầy đủ cột xem [`bot/src/db/schema.sql`](bot/src/db/schema.sql).
 
 ```text
+  schema_migrations ───▶ version schema đã apply trên DB production
+  bot_errors ──────────▶ lỗi vận hành append-only để dashboard /errors đọc
+
   members ──────────────┐ (zalo_user_id PK)
    • role, is_active     │
    • first_seen_at       │   1 ─── N
@@ -444,6 +447,7 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 
 ```text
   * * * * *      telegram-poll     # mỗi phút: duyệt/huỷ/retry/timeout
+  */5 * * * *    health-check      # mỗi 5 phút: báo Telegram nếu bot heartbeat stale
   17 */6 * * *   sync-votes        # mỗi 6h: backup đọc voter trong poll
   0 9 25 * *     cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=0 SEND_GROUP_WARNINGS=1)
   0 9 3 * *      monthly-cleanup   # ngày 3: lập danh sách + gửi Telegram duyệt (DRY_RUN=0)
@@ -455,12 +459,14 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 
 | Lệnh                          | Tác dụng                                              |
 |-------------------------------|-------------------------------------------------------|
-| `npm start`                   | Chạy listener 24/7 (PM2 dùng lệnh này cho `zalo-bot`) |
+| `npm run dev`                 | Chạy listener local từ TypeScript                     |
+| `npm run build && npm start`  | Build và chạy listener từ `dist/` (PM2 production)    |
 | `npm run list-groups`         | Liệt kê group + ID để điền `GROUP_ID`                 |
 | `npm run export-members`      | Xuất danh sách member ra CSV (tra ID cho VIP)         |
 | `npm run import-interactions` | Import vote/manual interaction từ CSV/JSON            |
 | `npm run sync-members`        | Đồng bộ member hiện tại từ Zalo về DB                 |
 | `npm run check-permissions`   | Kiểm tra role/quyền bot, không kick/xoá thật          |
+| `npm run health-check`        | Báo Telegram nếu bot heartbeat stale/hồi phục         |
 | `npm run sync-votes`          | Đọc voter trong poll → ghi tương tác                  |
 | `npm run telegram-test`       | Gửi tin thử để kiểm Telegram token + chat id          |
 | `npm run cleanup-warn`        | Cảnh báo group (DRY_RUN=1 chỉ in)                     |

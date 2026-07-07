@@ -3,10 +3,12 @@ import { runExportMembers } from "./commands/export-members.js";
 import { runListGroups } from "./commands/list-groups.js";
 import { runCleanupWarn, runMonthlyCleanup, runTelegramPoll } from "./commands/monthly-cleanup.js";
 import { runCheckPermissions } from "./commands/check-permissions.js";
+import { runHealthCheck } from "./commands/health-check.js";
 import { runImportInteractions } from "./commands/import-interactions.js";
 import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
+import { recordBotError } from "./db/index.js";
 
 /**
  * Entrypoint. Chọn lệnh qua arg đầu tiên:
@@ -30,6 +32,7 @@ Cách dùng:
   npm run import-interactions -- ./data/manual-votes.csv
   npm run sync-members      # đồng bộ member hiện tại từ Zalo → DB
   npm run check-permissions # kiểm tra quyền bot trong group (không kick/xoá thật)
+  npm run health-check      # cron: báo Telegram nếu bot heartbeat stale
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
   npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
@@ -59,6 +62,9 @@ async function main(): Promise<void> {
     case "check-permissions":
       await runCheckPermissions();
       break;
+    case "health-check":
+      await runHealthCheck();
+      break;
     case "sync-votes":
       await runSyncVotes();
       break;
@@ -82,6 +88,16 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
+  try {
+    recordBotError({
+      source: "index",
+      code: "fatal",
+      message: String(e),
+      detail: e instanceof Error ? e.stack : null,
+    });
+  } catch {
+    // Nếu DB cũng lỗi, vẫn in fatal ra stderr.
+  }
   console.error("[fatal]", e);
   process.exitCode = 1;
 });

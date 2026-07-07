@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { setCleanupPlanItemStatus } from "@/lib/db";
+import { getBotHealth, isBotHealthFresh, setCleanupPlanItemStatus } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +31,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Status không hợp lệ" }, { status: 400 });
   }
 
-  setCleanupPlanItemStatus({ id: itemId, status });
+  if (!isBotHealthFresh(getBotHealth())) {
+    return NextResponse.json({ error: "Bot heartbeat stale; không chỉnh plan lúc này." }, { status: 503 });
+  }
+
+  const changed = setCleanupPlanItemStatus({ id: itemId, status });
+  if (!changed) {
+    return NextResponse.json({ error: "Item không còn chỉnh được ở trạng thái hiện tại." }, { status: 409 });
+  }
   return NextResponse.json({ ok: true });
 }

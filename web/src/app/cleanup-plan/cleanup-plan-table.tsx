@@ -5,7 +5,13 @@ import { Badge, Button, Table, Td, Th } from "@/components/ui";
 import { fmtAgo, fmtDateTime } from "@/lib/utils";
 import type { CleanupPlanItemRow } from "@/lib/db";
 
-export function CleanupPlanTable({ initialItems }: { initialItems: CleanupPlanItemRow[] }) {
+export function CleanupPlanTable({
+  initialItems,
+  canEdit,
+}: {
+  initialItems: CleanupPlanItemRow[];
+  canEdit: boolean;
+}) {
   const [items, setItems] = useState(initialItems);
   const [busyId, setBusyId] = useState<number | null>(null);
 
@@ -63,7 +69,7 @@ export function CleanupPlanTable({ initialItems }: { initialItems: CleanupPlanIt
                 <Button
                   variant="ghost"
                   onClick={() => void setStatus(item.id, "skipped")}
-                  disabled={busyId === item.id}
+                  disabled={!canEdit || busyId === item.id}
                 >
                   Bỏ chọn
                 </Button>
@@ -71,7 +77,7 @@ export function CleanupPlanTable({ initialItems }: { initialItems: CleanupPlanIt
                 <Button
                   variant="ghost"
                   onClick={() => void setStatus(item.id, "planned")}
-                  disabled={busyId === item.id}
+                  disabled={!canEdit || busyId === item.id}
                 >
                   Khôi phục
                 </Button>

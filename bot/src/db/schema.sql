@@ -1,6 +1,26 @@
 -- Schema Bot-Member-Zalo. Toàn bộ idempotent (CREATE IF NOT EXISTS).
 -- Chạy qua db.exec() mỗi lần khởi động. Timestamp = epoch milliseconds (INTEGER).
 
+-- Version schema đã apply. Dùng để dashboard/ops biết DB production đang ở mốc nào.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version     TEXT PRIMARY KEY,
+  applied_at  INTEGER NOT NULL,
+  note        TEXT
+);
+
+-- Lỗi vận hành append-only để dashboard xem thay vì phải SSH đọc log.
+CREATE TABLE IF NOT EXISTS bot_errors (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  source      TEXT NOT NULL,
+  code        TEXT NOT NULL DEFAULT '',
+  message     TEXT NOT NULL,
+  detail      TEXT,
+  created_at  INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_errors_created ON bot_errors(created_at);
+CREATE INDEX IF NOT EXISTS idx_bot_errors_source ON bot_errors(source, created_at);
+
 -- Thành viên group. zalo_user_id là khoá nghiệp vụ (id nội bộ Zalo, không đổi).
 CREATE TABLE IF NOT EXISTS members (
   zalo_user_id   TEXT PRIMARY KEY,

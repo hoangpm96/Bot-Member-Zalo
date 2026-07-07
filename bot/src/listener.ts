@@ -22,6 +22,7 @@ import {
   recordMemberEvent,
   saveGroupMessage,
   saveGroupMediaEvent,
+  recordBotError,
   recordModerationAction,
   setBotState,
 } from "./db/index.js";
@@ -357,6 +358,12 @@ async function syncMembersOnce(api: any, now: number, requestedBy = "listener"):
         `upsert=${result.upserted}, inactive=${result.markedLeft}, group="${result.groupName}".`,
     );
   } catch (e) {
+    recordBotError({
+      source: "listener",
+      code: "sync_members_once_failed",
+      message: String(e),
+      detail: e instanceof Error ? e.stack : null,
+    });
     console.warn(`[listener] Không sync được member: ${String(e)}`);
   }
 }
@@ -440,6 +447,13 @@ export async function runListener(): Promise<void> {
         console.log(`[listener] Đã check quyền theo yêu cầu dashboard: role=${result.role}.`);
       } catch (e) {
         const checkedAt = Date.now();
+        recordBotError({
+          source: "listener",
+          code: "permission_check_failed",
+          message: String(e),
+          detail: e instanceof Error ? e.stack : null,
+          now: checkedAt,
+        });
         setBotState(
           "permission_check",
           JSON.stringify({ checkedAt, requestedBy: request.requestedBy, error: String(e), issues: [String(e)] }),
@@ -652,6 +666,12 @@ export async function runListener(): Promise<void> {
   api.listener.on("error", (err: unknown) => {
     socketState = "error";
     lastSocketError = String(err);
+    recordBotError({
+      source: "listener",
+      code: "socket_error",
+      message: String(err),
+      detail: err instanceof Error ? err.stack : null,
+    });
     writeHealth("error");
     console.warn(`[listener] WebSocket error: ${String(err)}`);
   });

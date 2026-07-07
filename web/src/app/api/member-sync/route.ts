@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { DbNotReadyError, getLatestMemberSyncRun } from "@/lib/db";
+import { DbNotReadyError, getBotHealth, getLatestMemberSyncRun, isBotHealthFresh } from "@/lib/db";
 import { memberSyncRequestPath } from "@/lib/login-status";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +42,9 @@ export async function POST(request: Request) {
   const requestedAt = Date.now();
 
   try {
+    if (!isBotHealthFresh(getBotHealth())) {
+      return NextResponse.json({ error: "Bot heartbeat stale hoặc bot chưa chạy; không gửi yêu cầu sync." }, { status: 503 });
+    }
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(tempPath, JSON.stringify({ requestedAt, requestedBy: "dashboard" }, null, 2), {
       encoding: "utf8",

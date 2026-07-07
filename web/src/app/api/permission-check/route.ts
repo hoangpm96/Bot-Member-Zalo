@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { getPermissionCheckStatus } from "@/lib/db";
+import { getBotHealth, getPermissionCheckStatus, isBotHealthFresh } from "@/lib/db";
 import { permissionCheckRequestPath } from "@/lib/login-status";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +29,9 @@ export async function POST(request: Request) {
   const tempPath = `${requestPath}.${process.pid}.tmp`;
   const requestedAt = Date.now();
   try {
+    if (!isBotHealthFresh(getBotHealth())) {
+      return NextResponse.json({ error: "Bot heartbeat stale hoặc bot chưa chạy; không gửi check quyền." }, { status: 503 });
+    }
     fs.mkdirSync(path.dirname(requestPath), { recursive: true });
     fs.writeFileSync(tempPath, JSON.stringify({ requestedAt, requestedBy: "dashboard" }, null, 2), {
       encoding: "utf8",
