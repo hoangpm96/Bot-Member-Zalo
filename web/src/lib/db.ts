@@ -18,6 +18,41 @@ export class DbNotReadyError extends Error {}
 
 let db: Database.Database | null = null;
 
+function ensureWebSchema(database: Database.Database): void {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS cleanup_draft_plans (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      created_at        INTEGER NOT NULL,
+      target_count      INTEGER NOT NULL,
+      member_count      INTEGER NOT NULL,
+      over_target       INTEGER NOT NULL,
+      max_kicks         INTEGER NOT NULL,
+      candidate_count   INTEGER NOT NULL,
+      grace_count       INTEGER NOT NULL,
+      removable_count   INTEGER NOT NULL,
+      note              TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS cleanup_draft_plan_items (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      draft_plan_id      INTEGER NOT NULL,
+      zalo_user_id       TEXT NOT NULL,
+      display_name       TEXT NOT NULL DEFAULT '',
+      interaction_count  INTEGER NOT NULL DEFAULT 0,
+      last_interaction   INTEGER,
+      warning_count      INTEGER NOT NULL DEFAULT 0,
+      rank               INTEGER NOT NULL,
+      action             TEXT NOT NULL,
+      reason             TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY (draft_plan_id) REFERENCES cleanup_draft_plans(id),
+      UNIQUE (draft_plan_id, zalo_user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cleanup_draft_items_plan
+      ON cleanup_draft_plan_items(draft_plan_id, rank);
+  `);
+}
+
 export function getDb(): Database.Database {
   if (db) return db;
   if (!fs.existsSync(DB_PATH)) {
@@ -31,6 +66,7 @@ export function getDb(): Database.Database {
   db = new Database(DB_PATH);
   db.pragma("busy_timeout = 5000");
   db.pragma("foreign_keys = ON");
+  ensureWebSchema(db);
   return db;
 }
 
@@ -83,6 +119,24 @@ export interface MemberSummary {
   total_interactions: number;
 }
 
+export interface OverTargetCandidateRow extends MemberStatRow {
+  rank: number;
+  action: "grace" | "remove";
+  reason: string;
+}
+
+export interface OverTargetCandidatePlan {
+  total: number;
+  target: number;
+  overTarget: number;
+  maxKicks: number;
+  needToReview: number;
+  eligibleCount: number;
+  graceCount: number;
+  removableCount: number;
+  candidates: OverTargetCandidateRow[];
+}
+
 export interface MemberOption {
   id: string;
   displayName: string;
@@ -109,6 +163,128 @@ export interface ScanRunRow {
   planned_kicks: number | null;
   actual_kicks: number | null;
   note: string | null;
+}
+
+export interface MemberSyncRunRow {
+  id: number;
+  requested_by: string;
+  started_at: number;
+  finished_at: number | null;
+  status: "running" | "done" | "failed";
+  group_id: string | null;
+  group_name: string | null;
+  member_count: number | null;
+  snapshot_count: number | null;
+  upserted: number | null;
+  marked_left: number | null;
+  error: string | null;
+}
+
+export interface MemberEventRow {
+  id: number;
+  zalo_user_id: string;
+  display_name: string;
+  role: "owner" | "admin" | "member" | null;
+  event_type: string;
+  source: string;
+  sync_run_id: number | null;
+  ts: number;
+  note: string | null;
+}
+
+export interface MemberEventFilters {
+  eventType?: string;
+  source?: string;
+  from?: number | null;
+  to?: number | null;
+  limit?: number;
+}
+
+export interface BotHealth {
+  reason?: string;
+  pid?: number;
+  startedAt?: number;
+  heartbeatAt?: number;
+  uptimeMs?: number;
+  socketState?: string;
+  lastSocketError?: string | null;
+  messageEvents?: number;
+  reactionEvents?: number;
+  selfEvents?: number;
+  totalEvents?: number;
+  lastEventAt?: number | null;
+  lastEventType?: string | null;
+  lastEventSender?: string;
+}
+
+export interface PermissionCheckStatus {
+  checkedAt?: number;
+  requestedBy?: string;
+  groupId?: string;
+  groupName?: string;
+  ownId?: string;
+  role?: string;
+  canReadMembers?: boolean;
+  likelyCanKick?: boolean;
+  likelyCanDeleteMessages?: boolean;
+  likelyCanBlockMembers?: boolean;
+  issues?: string[];
+  error?: string;
+}
+
+export interface GroupMediaEventRow {
+  id: number;
+  thread_id: string;
+  message_id: string;
+  zalo_user_id: string;
+  display_name: string;
+  media_type: "image" | "video";
+  media_count: number;
+  msg_type: string;
+  ts: number;
+  is_self: number;
+  source: string;
+  created_at: number;
+}
+
+export interface MediaSummary {
+  imageEvents: number;
+  imageCount: number;
+  videoEvents: number;
+  videoCount: number;
+}
+
+export interface CleanupPlanItemRow {
+  id: number;
+  scan_run_id: number;
+  zalo_user_id: string;
+  display_name: string;
+  interaction_count: number;
+  last_interaction: number | null;
+  rank: number;
+  status: "planned" | "removed" | "failed" | "skipped";
+  error: string | null;
+  updated_at: number;
+}
+
+export interface CleanupDraftPlanRow {
+  id: number;
+  created_at: number;
+  target_count: number;
+  member_count: number;
+  over_target: number;
+  max_kicks: number;
+  candidate_count: number;
+  grace_count: number;
+  removable_count: number;
+  note: string | null;
+}
+
+export interface CleanupDraftComparison {
+  plan: CleanupDraftPlanRow;
+  stillActive: number;
+  noLongerActive: number;
+  interactedMore: number;
 }
 
 export interface GroupMessageRow {
@@ -320,6 +496,283 @@ export function listScanRuns(limit = 100): ScanRunRow[] {
     .all({ limit }) as ScanRunRow[];
 }
 
+export function getScanRun(id: number): ScanRunRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM scan_runs WHERE id = @id`)
+    .get({ id }) as ScanRunRow | undefined;
+}
+
+export function getLatestPlanRun(): ScanRunRow | undefined {
+  return getDb()
+    .prepare(
+      `SELECT r.*
+       FROM scan_runs r
+       WHERE EXISTS (SELECT 1 FROM cleanup_plan_items i WHERE i.scan_run_id = r.id)
+       ORDER BY r.id DESC
+       LIMIT 1`,
+    )
+    .get() as ScanRunRow | undefined;
+}
+
+export function listCleanupPlanItems(scanRunId: number): CleanupPlanItemRow[] {
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM cleanup_plan_items
+       WHERE scan_run_id = @scanRunId
+       ORDER BY rank ASC`,
+    )
+    .all({ scanRunId }) as CleanupPlanItemRow[];
+}
+
+export function setCleanupPlanItemStatus(input: {
+  id: number;
+  status: "planned" | "skipped";
+  error?: string | null;
+}): void {
+  getDb()
+    .prepare(
+      `UPDATE cleanup_plan_items
+       SET status = @status, error = @error, updated_at = @now
+       WHERE id = @id AND status IN ('planned', 'skipped', 'failed')`,
+    )
+    .run({
+      id: input.id,
+      status: input.status,
+      error: input.status === "skipped" ? input.error ?? "Admin bỏ chọn trên dashboard." : null,
+      now: Date.now(),
+    });
+}
+
+function readJsonState<T>(key: string): T | null {
+  const raw = getState(key);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function getBotHealth(): BotHealth | null {
+  return readJsonState<BotHealth>("bot_health");
+}
+
+export function getPermissionCheckStatus(): PermissionCheckStatus | null {
+  return readJsonState<PermissionCheckStatus>("permission_check");
+}
+
+export function getLatestMemberSyncRun(): MemberSyncRunRow | undefined {
+  if (!tableExists("member_sync_runs")) return undefined;
+  return getDb()
+    .prepare(`SELECT * FROM member_sync_runs ORDER BY id DESC LIMIT 1`)
+    .get() as MemberSyncRunRow | undefined;
+}
+
+function memberEventWhere(filters: MemberEventFilters): { sql: string; params: Record<string, string | number | null> } {
+  const clauses: string[] = [];
+  const params: Record<string, string | number | null> = {
+    eventType: filters.eventType ?? "all",
+    source: filters.source ?? "all",
+    from: filters.from ?? null,
+    to: filters.to ?? null,
+    limit: Math.min(Math.max(filters.limit ?? 200, 1), 5000),
+  };
+  if (filters.eventType && filters.eventType !== "all") clauses.push(`event_type = @eventType`);
+  if (filters.source && filters.source !== "all") clauses.push(`source = @source`);
+  if (filters.from) clauses.push(`ts >= @from`);
+  if (filters.to) clauses.push(`ts <= @to`);
+  return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+}
+
+export function listMemberEvents(filtersOrLimit: MemberEventFilters | number = 200): MemberEventRow[] {
+  if (!tableExists("member_events")) return [];
+  const filters = typeof filtersOrLimit === "number" ? { limit: filtersOrLimit } : filtersOrLimit;
+  const where = memberEventWhere(filters);
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM member_events
+       ${where.sql}
+       ORDER BY ts DESC, id DESC
+       LIMIT @limit`,
+    )
+    .all(where.params) as MemberEventRow[];
+}
+
+export function countMemberEvents(filters: MemberEventFilters = {}): number {
+  if (!tableExists("member_events")) return 0;
+  const where = memberEventWhere(filters);
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM member_events ${where.sql}`)
+    .get(where.params) as { n: number };
+  return row.n;
+}
+
+export function buildOverTargetCandidatePlan(input: {
+  target: number;
+  maxKicks: number;
+  vipIds?: string[];
+  now?: number;
+}): OverTargetCandidatePlan {
+  const total = countActiveMembers();
+  const overTarget = Math.max(0, total - input.target);
+  const needToReview = Math.min(overTarget, input.maxKicks);
+  const vipIds = [...new Set(input.vipIds ?? [])].filter(Boolean);
+  const cycleStart = (() => {
+    const d = new Date(input.now ?? Date.now());
+    return new Date(d.getFullYear(), d.getMonth(), 1, 0, 0, 0, 0).getTime();
+  })();
+  const vipParams = Object.fromEntries(vipIds.map((id, idx) => [`vip${idx}`, id]));
+  const vipClause = vipIds.length ? `AND m.zalo_user_id NOT IN (${vipIds.map((_, idx) => `@vip${idx}`).join(", ")})` : "";
+  const params = {
+    cycleStart,
+    limit: Math.max(needToReview, 1),
+    ...vipParams,
+  };
+  const cte = `WITH member_stats AS (
+    SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
+           COUNT(i.id) AS interaction_count,
+           MAX(i.ts) AS last_interaction,
+           COALESCE(cw.warning_count, 0) AS warning_count,
+           cw.last_warned_at AS last_warned_at
+    FROM members m
+    LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+    LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
+    WHERE m.is_active = 1
+      AND m.role = 'member'
+      AND m.first_seen_at < @cycleStart
+      AND (m.joined_at IS NULL OR m.joined_at < @cycleStart)
+      ${vipClause}
+    GROUP BY m.zalo_user_id
+  )`;
+
+  const eligible = getDb()
+    .prepare(`${cte} SELECT COUNT(*) AS n FROM member_stats`)
+    .get(params) as { n: number };
+
+  const rows =
+    needToReview > 0
+      ? (getDb()
+          .prepare(
+            `${cte}
+             SELECT *
+             FROM member_stats
+             ORDER BY interaction_count ASC, last_interaction ASC
+             LIMIT @limit`,
+          )
+          .all(params) as MemberStatRow[])
+      : [];
+
+  const candidates = rows.map((row, idx): OverTargetCandidateRow => {
+    const action = row.interaction_count === 0 && row.warning_count === 0 ? "grace" : "remove";
+    return {
+      ...row,
+      rank: idx + 1,
+      action,
+      reason:
+        row.interaction_count === 0
+          ? row.warning_count === 0
+            ? "0 tương tác, kỳ đầu sẽ ân hạn"
+            : "0 tương tác, đã từng cảnh báo"
+          : `${row.interaction_count} tương tác`,
+    };
+  });
+
+  return {
+    total,
+    target: input.target,
+    overTarget,
+    maxKicks: input.maxKicks,
+    needToReview,
+    eligibleCount: eligible.n,
+    graceCount: candidates.filter((c) => c.action === "grace").length,
+    removableCount: candidates.filter((c) => c.action === "remove").length,
+    candidates,
+  };
+}
+
+export function saveCleanupDraftPlan(plan: OverTargetCandidatePlan, note?: string): number {
+  const now = Date.now();
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const res = db
+      .prepare(
+        `INSERT INTO cleanup_draft_plans
+           (created_at, target_count, member_count, over_target, max_kicks,
+            candidate_count, grace_count, removable_count, note)
+         VALUES
+           (@createdAt, @target, @total, @overTarget, @maxKicks,
+            @candidateCount, @graceCount, @removableCount, @note)`,
+      )
+      .run({
+        createdAt: now,
+        target: plan.target,
+        total: plan.total,
+        overTarget: plan.overTarget,
+        maxKicks: plan.maxKicks,
+        candidateCount: plan.candidates.length,
+        graceCount: plan.graceCount,
+        removableCount: plan.removableCount,
+        note: note ?? null,
+      });
+    const draftPlanId = Number(res.lastInsertRowid);
+    const stmt = db.prepare(
+      `INSERT INTO cleanup_draft_plan_items
+         (draft_plan_id, zalo_user_id, display_name, interaction_count, last_interaction,
+          warning_count, rank, action, reason)
+       VALUES
+         (@draftPlanId, @zaloUserId, @displayName, @interactionCount, @lastInteraction,
+          @warningCount, @rank, @action, @reason)`,
+    );
+    for (const item of plan.candidates) {
+      stmt.run({
+        draftPlanId,
+        zaloUserId: item.zalo_user_id,
+        displayName: item.display_name,
+        interactionCount: item.interaction_count,
+        lastInteraction: item.last_interaction,
+        warningCount: item.warning_count,
+        rank: item.rank,
+        action: item.action,
+        reason: item.reason,
+      });
+    }
+    return draftPlanId;
+  });
+  return tx() as number;
+}
+
+export function getLatestCleanupDraftComparison(): CleanupDraftComparison | null {
+  const plan = getDb()
+    .prepare(`SELECT * FROM cleanup_draft_plans ORDER BY id DESC LIMIT 1`)
+    .get() as CleanupDraftPlanRow | undefined;
+  if (!plan) return null;
+
+  const row = getDb()
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN m.is_active = 1 THEN 1 ELSE 0 END), 0) AS stillActive,
+         COALESCE(SUM(CASE WHEN m.is_active IS NULL OR m.is_active != 1 THEN 1 ELSE 0 END), 0) AS noLongerActive,
+         COALESCE(SUM(CASE WHEN cur.interaction_count > i.interaction_count THEN 1 ELSE 0 END), 0) AS interactedMore
+       FROM cleanup_draft_plan_items i
+       LEFT JOIN members m ON m.zalo_user_id = i.zalo_user_id
+       LEFT JOIN (
+         SELECT zalo_user_id, COUNT(*) AS interaction_count
+         FROM interactions
+         GROUP BY zalo_user_id
+       ) cur ON cur.zalo_user_id = i.zalo_user_id
+       WHERE i.draft_plan_id = @id`,
+    )
+    .get({ id: plan.id }) as {
+    stillActive: number;
+    noLongerActive: number;
+    interactedMore: number;
+  };
+
+  return { plan, ...row };
+}
+
 // ---- Group message archive ----
 
 function messageWhere(filters: MessageFilters): { sql: string; params: Record<string, string | number | null> } {
@@ -345,9 +798,32 @@ function messageWhere(filters: MessageFilters): { sql: string; params: Record<st
   };
 }
 
+function mediaWhere(filters: MessageFilters): { sql: string; params: Record<string, string | number | null> } {
+  const clauses: string[] = [];
+  const q = filters.q?.trim().toLowerCase() ?? "";
+  const params: Record<string, string | number | null> = {
+    q,
+    like: `%${q}%`,
+    from: filters.from ?? null,
+    to: filters.to ?? null,
+    limit: Math.min(Math.max(filters.limit ?? 200, 1), 5000),
+  };
+
+  if (q) clauses.push(`(LOWER(display_name) LIKE @like OR zalo_user_id LIKE @like OR media_type LIKE @like)`);
+  if (filters.from) clauses.push(`ts >= @from`);
+  if (filters.to) clauses.push(`ts <= @to`);
+  if (filters.self === "self") clauses.push(`is_self = 1`);
+  if (filters.self === "member") clauses.push(`is_self = 0`);
+
+  return {
+    sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
+    params,
+  };
+}
+
 export function countGroupMessages(filters: MessageFilters = {}): number {
   if (!tableExists("group_messages")) return 0;
-  const where = messageWhere(filters);
+  const where = mediaWhere(filters);
   const row = getDb()
     .prepare(`SELECT COUNT(*) AS n FROM group_messages ${where.sql}`)
     .get(where.params) as { n: number };
@@ -356,7 +832,7 @@ export function countGroupMessages(filters: MessageFilters = {}): number {
 
 export function listGroupMessages(filters: MessageFilters = {}): GroupMessageRow[] {
   if (!tableExists("group_messages")) return [];
-  const where = messageWhere(filters);
+  const where = mediaWhere(filters);
   return getDb()
     .prepare(
       `SELECT *
@@ -366,6 +842,39 @@ export function listGroupMessages(filters: MessageFilters = {}): GroupMessageRow
        LIMIT @limit`,
     )
     .all(where.params) as GroupMessageRow[];
+}
+
+export function summarizeGroupMedia(filters: MessageFilters = {}): MediaSummary {
+  if (!tableExists("group_media_events")) {
+    return { imageEvents: 0, imageCount: 0, videoEvents: 0, videoCount: 0 };
+  }
+  const where = messageWhere(filters);
+  const row = getDb()
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN media_type = 'image' THEN 1 ELSE 0 END), 0) AS imageEvents,
+         COALESCE(SUM(CASE WHEN media_type = 'image' THEN media_count ELSE 0 END), 0) AS imageCount,
+         COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0) AS videoEvents,
+         COALESCE(SUM(CASE WHEN media_type = 'video' THEN media_count ELSE 0 END), 0) AS videoCount
+       FROM group_media_events
+       ${where.sql}`,
+    )
+    .get(where.params) as MediaSummary;
+  return row;
+}
+
+export function listGroupMediaEvents(filters: MessageFilters = {}): GroupMediaEventRow[] {
+  if (!tableExists("group_media_events")) return [];
+  const where = messageWhere(filters);
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM group_media_events
+       ${where.sql}
+       ORDER BY ts DESC, id DESC
+       LIMIT @limit`,
+    )
+    .all(where.params) as GroupMediaEventRow[];
 }
 
 // ---- bot_state (config) ----

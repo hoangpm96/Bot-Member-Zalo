@@ -151,6 +151,7 @@ trả lỗi 503 rõ ràng thay vì báo thành công giả.
    │ message                  │──▶ record(msg,"message") ──▶ logInteraction ──▶ interactions
    │                          │        │                                       (type='message')
    │                          │        └─ nếu có text ─────▶ saveGroupMessage ─▶ group_messages
+   │                          │        └─ nếu ảnh/video ───▶ saveGroupMedia ───▶ group_media_events
    │                          │        └─ upsertMember ─────────────────────────▶ members
    ├──────────────────────────┤
    │ reaction                 │──▶ record(rc,"reaction") ──▶ logInteraction ───▶ interactions
@@ -162,6 +163,11 @@ trả lỗi 503 rõ ràng thay vì báo thành công giả.
    └──────────────────────────┘
 
    Định kỳ trong listener:
+   • startup + mỗi LISTENER_MEMBER_SYNC_INTERVAL_MS → syncGroupMembers()
+     (sửa lệch khi admin xoá tay hoặc WebSocket rớt group_event)
+     └─ ghi member_sync_runs + member_events để dashboard/audit đọc lại
+   • heartbeat → ghi bot_health vào bot_state để dashboard biết process/socket còn sống
+   • dashboard request → check-permissions không phá huỷ, lưu permission_check vào bot_state
    • mỗi 6h  → syncVotesOnce() → fetchGroupPollVotes ─▶ logInteraction(type='vote')
    • heartbeat (LISTENER_HEARTBEAT_MS) → log socket còn sống
 
@@ -361,7 +367,11 @@ khởi động. Đầy đủ cột xem [`bot/src/db/schema.sql`](bot/src/db/sche
                          │                 UNIQUE(user, ts, type, source)
                          ├──────────────▶ group_messages (text only)
                          │                 UNIQUE(thread_id, message_id)
+                         ├──────────────▶ group_media_events (image/video metadata only)
+                         ├──────────────▶ member_events (join/leave/remove/reactivate)
                          └──────────────▶ cleanup_warnings (ân hạn 0-tương-tác)
+
+  member_sync_runs ──────▶ lịch sử các lần đồng bộ member từ Zalo
 
   scan_runs ────────────┐ (1 kỳ quét/dọn)
    • status: collecting │   1 ─── N
@@ -370,6 +380,8 @@ khởi động. Đầy đủ cột xem [`bot/src/db/schema.sql`](bot/src/db/sche
      | kicking | done   └──────────────▶ removals (ai đã bị xoá thật)
      | cancelled
      | skipped | failed
+
+  cleanup_draft_plans ──▶ plan nháp lưu từ dashboard /candidates để so sánh trước cleanup
 
   moderation_actions (append-only): mỗi lần xoá tin/ban vì dính từ khoá cấm
    • matched_word, text, action (delete_only|delete_and_ban)
@@ -447,6 +459,8 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 | `npm run list-groups`         | Liệt kê group + ID để điền `GROUP_ID`                 |
 | `npm run export-members`      | Xuất danh sách member ra CSV (tra ID cho VIP)         |
 | `npm run import-interactions` | Import vote/manual interaction từ CSV/JSON            |
+| `npm run sync-members`        | Đồng bộ member hiện tại từ Zalo về DB                 |
+| `npm run check-permissions`   | Kiểm tra role/quyền bot, không kick/xoá thật          |
 | `npm run sync-votes`          | Đọc voter trong poll → ghi tương tác                  |
 | `npm run telegram-test`       | Gửi tin thử để kiểm Telegram token + chat id          |
 | `npm run cleanup-warn`        | Cảnh báo group (DRY_RUN=1 chỉ in)                     |

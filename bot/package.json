@@ -12,6 +12,8 @@
     "list-groups": "tsx src/index.ts list-groups",
     "export-members": "tsx src/index.ts export-members",
     "import-interactions": "tsx src/index.ts import-interactions",
+    "sync-members": "tsx src/index.ts sync-members",
+    "check-permissions": "tsx src/index.ts check-permissions",
     "sync-votes": "tsx src/index.ts sync-votes",
     "telegram-test": "tsx src/index.ts telegram-test",
     "cleanup-warn": "tsx src/index.ts cleanup-warn",

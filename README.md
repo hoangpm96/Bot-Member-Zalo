@@ -11,7 +11,10 @@ Telegram.
 ## Tính năng
 
 - Đăng nhập Zalo bằng QR ngay trên dashboard.
-- Listener 24/7 cho message, reaction và sự kiện thành viên.
+- Listener 24/7 cho message, reaction, sự kiện thành viên và sync snapshot member định kỳ.
+- Dashboard có nút sync member ngay, trạng thái sync gần nhất, trang ứng viên và audit sự kiện thành viên.
+- Dashboard có Bot health, check quyền bot, duyệt từng item trong cleanup plan và lưu plan nháp.
+- Ghi metadata ảnh/video theo user/thời điểm/số lượng; không lưu file, URL hay nội dung media.
 - Lưu text message, gồm cả self-message; không lưu ảnh, audio hay file.
 - Đồng bộ lượt vote từ poll khi Zalo cho phép đọc voter.
 - Giai đoạn warmup trước khi cleanup để tránh đánh giá thiếu dữ liệu.

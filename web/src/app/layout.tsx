@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import Link from "next/link";
-import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare } from "lucide-react";
+import { LayoutDashboard, Users, History, Settings, LogIn, MessageSquare, UserRoundCheck, UserMinus, ListChecks } from "lucide-react";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,6 +16,9 @@ export const viewport: Viewport = {
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
   { href: "/members", label: "Thành viên", shortLabel: "Thành viên", icon: Users },
+  { href: "/candidates", label: "Ứng viên", shortLabel: "Ứng viên", icon: UserMinus },
+  { href: "/cleanup-plan", label: "Duyệt DS", shortLabel: "Duyệt", icon: ListChecks },
+  { href: "/events", label: "Sự kiện TV", shortLabel: "Sự kiện", icon: UserRoundCheck },
   { href: "/messages", label: "Tin nhắn", shortLabel: "Tin nhắn", icon: MessageSquare },
   { href: "/history", label: "Lịch sử dọn", shortLabel: "Lịch sử", icon: History },
   { href: "/settings", label: "Cấu hình", shortLabel: "Cấu hình", icon: Settings },

@@ -17,6 +17,8 @@ const QR_DIR =
 const STATUS_PATH = path.join(QR_DIR, "login-status.json");
 const QR_IMAGE_PATH = path.join(QR_DIR, "qr.png");
 const RELOGIN_REQUEST_PATH = path.join(QR_DIR, "relogin-request.json");
+const MEMBER_SYNC_REQUEST_PATH = path.join(QR_DIR, "member-sync-request.json");
+const PERMISSION_CHECK_REQUEST_PATH = path.join(QR_DIR, "permission-check-request.json");
 
 export type LoginState =
   | "ready"
@@ -91,4 +93,14 @@ export function qrImageExists(): boolean {
 /** Đường dẫn marker để dashboard yêu cầu bot tự xoá session và login lại. */
 export function reloginRequestPath(): string {
   return RELOGIN_REQUEST_PATH;
+}
+
+/** Đường dẫn marker để dashboard yêu cầu bot sync member ngay. */
+export function memberSyncRequestPath(): string {
+  return MEMBER_SYNC_REQUEST_PATH;
+}
+
+/** Đường dẫn marker để dashboard yêu cầu bot kiểm tra quyền group. */
+export function permissionCheckRequestPath(): string {
+  return PERMISSION_CHECK_REQUEST_PATH;
 }

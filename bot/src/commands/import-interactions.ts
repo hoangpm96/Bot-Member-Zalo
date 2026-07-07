@@ -25,7 +25,7 @@ interface ImportRow {
   name?: unknown;
 }
 
-const ALLOWED_TYPES = new Set<InteractionType>(["message", "reaction", "vote", "manual"]);
+const ALLOWED_TYPES = new Set<InteractionType>(["message", "reaction", "vote", "manual", "image", "video"]);
 
 export function runImportInteractions(fileArg?: string): void {
   if (!fileArg) {

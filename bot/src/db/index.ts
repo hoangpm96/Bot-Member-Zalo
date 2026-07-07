@@ -29,7 +29,10 @@ export function getDb(): Database.Database {
 // ---- Types ----
 
 export type MemberRole = "owner" | "admin" | "member";
-export type InteractionType = "message" | "reaction" | "vote" | "manual";
+export type MemberEventType = "joined" | "left" | "removed" | "blocked" | "reactivated";
+export type MemberEventSource = "listener" | "snapshot_sync" | "bot_cleanup" | "moderation";
+export type MemberSyncRunStatus = "running" | "done" | "failed";
+export type InteractionType = "message" | "reaction" | "vote" | "manual" | "image" | "video";
 export type InteractionSource = "listener" | "manual" | "poll";
 export type ScanRunStatus =
   | "collecting"
@@ -60,6 +63,21 @@ export interface MemberStats {
   first_seen_at: number;
   interaction_count: number;
   last_interaction: number | null;
+}
+
+export interface MemberSyncRunRow {
+  id: number;
+  requested_by: string;
+  started_at: number;
+  finished_at: number | null;
+  status: MemberSyncRunStatus;
+  group_id: string | null;
+  group_name: string | null;
+  member_count: number | null;
+  snapshot_count: number | null;
+  upserted: number | null;
+  marked_left: number | null;
+  error: string | null;
 }
 
 export interface ScanRunRow {
@@ -95,6 +113,20 @@ export interface GroupMessageInput {
   zaloUserId: string;
   displayName?: string;
   text: string;
+  msgType?: string;
+  ts: number;
+  isSelf?: boolean;
+  source?: "listener";
+  now: number;
+}
+
+export interface GroupMediaEventInput {
+  threadId: string;
+  messageId: string;
+  zaloUserId: string;
+  displayName?: string;
+  mediaType: "image" | "video";
+  mediaCount: number;
   msgType?: string;
   ts: number;
   isSelf?: boolean;
@@ -149,6 +181,94 @@ export function getMember(zaloUserId: string): MemberRow | undefined {
     .get({ id: zaloUserId }) as MemberRow | undefined;
 }
 
+// ---- Member sync / audit ----
+
+export function createMemberSyncRun(input: { requestedBy: string; startedAt: number }): number {
+  const res = getDb()
+    .prepare(
+      `INSERT INTO member_sync_runs (requested_by, started_at, status)
+       VALUES (@requestedBy, @startedAt, 'running')`,
+    )
+    .run(input);
+  return Number(res.lastInsertRowid);
+}
+
+export function finishMemberSyncRun(input: {
+  id: number;
+  finishedAt: number;
+  status: MemberSyncRunStatus;
+  groupId?: string | null;
+  groupName?: string | null;
+  memberCount?: number | null;
+  snapshotCount?: number | null;
+  upserted?: number | null;
+  markedLeft?: number | null;
+  error?: string | null;
+}): void {
+  getDb()
+    .prepare(
+      `UPDATE member_sync_runs
+       SET finished_at = @finishedAt,
+           status = @status,
+           group_id = COALESCE(@groupId, group_id),
+           group_name = COALESCE(@groupName, group_name),
+           member_count = COALESCE(@memberCount, member_count),
+           snapshot_count = COALESCE(@snapshotCount, snapshot_count),
+           upserted = COALESCE(@upserted, upserted),
+           marked_left = COALESCE(@markedLeft, marked_left),
+           error = @error
+       WHERE id = @id`,
+    )
+    .run({
+      id: input.id,
+      finishedAt: input.finishedAt,
+      status: input.status,
+      groupId: input.groupId ?? null,
+      groupName: input.groupName ?? null,
+      memberCount: input.memberCount ?? null,
+      snapshotCount: input.snapshotCount ?? null,
+      upserted: input.upserted ?? null,
+      markedLeft: input.markedLeft ?? null,
+      error: input.error ?? null,
+    });
+}
+
+export function recordMemberEvent(input: {
+  zaloUserId: string;
+  displayName?: string;
+  role?: MemberRole | null;
+  eventType: MemberEventType;
+  source: MemberEventSource;
+  syncRunId?: number | null;
+  ts: number;
+  note?: string | null;
+}): void {
+  if (!input.zaloUserId) return;
+  getDb()
+    .prepare(
+      `INSERT INTO member_events
+         (zalo_user_id, display_name, role, event_type, source, sync_run_id, ts, note)
+       VALUES
+         (@zaloUserId, @displayName, @role, @eventType, @source, @syncRunId, @ts, @note)`,
+    )
+    .run({
+      zaloUserId: input.zaloUserId,
+      displayName: input.displayName ?? "",
+      role: input.role ?? null,
+      eventType: input.eventType,
+      source: input.source,
+      syncRunId: input.syncRunId ?? null,
+      ts: input.ts,
+      note: input.note ?? null,
+    });
+}
+
+export function getLatestMemberSyncRun(): MemberSyncRunRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM member_sync_runs ORDER BY id DESC LIMIT 1`)
+    .get() as MemberSyncRunRow | undefined;
+}
+
 // ---- Interactions (append-only) ----
 
 /**
@@ -191,6 +311,32 @@ export function saveGroupMessage(input: GroupMessageInput): void {
       zaloUserId: input.zaloUserId,
       displayName: input.displayName ?? "",
       text: input.text,
+      msgType: input.msgType ?? "",
+      ts: input.ts,
+      isSelf: input.isSelf ? 1 : 0,
+      source: input.source ?? "listener",
+      now: input.now,
+    });
+}
+
+/** Lưu metadata ảnh/video. Không lưu URL/file; chỉ đếm loại media theo message. */
+export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO group_media_events
+         (thread_id, message_id, zalo_user_id, display_name, media_type, media_count,
+          msg_type, ts, is_self, source, created_at)
+       VALUES
+         (@threadId, @messageId, @zaloUserId, @displayName, @mediaType, @mediaCount,
+          @msgType, @ts, @isSelf, @source, @now)`,
+    )
+    .run({
+      threadId: input.threadId,
+      messageId: input.messageId,
+      zaloUserId: input.zaloUserId,
+      displayName: input.displayName ?? "",
+      mediaType: input.mediaType,
+      mediaCount: Math.max(1, Math.trunc(input.mediaCount)),
       msgType: input.msgType ?? "",
       ts: input.ts,
       isSelf: input.isSelf ? 1 : 0,

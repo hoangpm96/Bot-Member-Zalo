@@ -62,6 +62,8 @@ type LoginState = "ready" | "waiting_scan" | "scanned" | "logged_in" | "expired"
 
 const LOGIN_RUNTIME_FILES = ["session.json", "qr.png", "login-status.json"] as const;
 const RELOGIN_REQUEST_FILE = "relogin-request.json";
+const MEMBER_SYNC_REQUEST_FILE = "member-sync-request.json";
+const PERMISSION_CHECK_REQUEST_FILE = "permission-check-request.json";
 
 /** Ghi trạng thái login + đường dẫn QR ra file để web panel hiển thị. */
 function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): void {
@@ -101,6 +103,54 @@ export function consumeReloginRequest(): boolean {
 
 export function reloginRequestExists(): boolean {
   return fs.existsSync(path.join(config.sessionDir, RELOGIN_REQUEST_FILE));
+}
+
+export interface MemberSyncRequest {
+  requestedAt: number;
+  requestedBy: string;
+}
+
+export function consumeMemberSyncRequest(): MemberSyncRequest | null {
+  const requestPath = path.join(config.sessionDir, MEMBER_SYNC_REQUEST_FILE);
+  if (!fs.existsSync(requestPath)) return null;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  } catch {
+    data = null;
+  } finally {
+    fs.rmSync(requestPath, { force: true });
+  }
+
+  const obj = (data ?? {}) as { requestedAt?: unknown; requestedBy?: unknown };
+  const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
+  const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard";
+  return { requestedAt, requestedBy };
+}
+
+export interface PermissionCheckRequest {
+  requestedAt: number;
+  requestedBy: string;
+}
+
+export function consumePermissionCheckRequest(): PermissionCheckRequest | null {
+  const requestPath = path.join(config.sessionDir, PERMISSION_CHECK_REQUEST_FILE);
+  if (!fs.existsSync(requestPath)) return null;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  } catch {
+    data = null;
+  } finally {
+    fs.rmSync(requestPath, { force: true });
+  }
+
+  const obj = (data ?? {}) as { requestedAt?: unknown; requestedBy?: unknown };
+  const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
+  const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard";
+  return { requestedAt, requestedBy };
 }
 
 export function hasSavedCredentials(): boolean {
@@ -241,14 +291,19 @@ export async function getGroupSnapshot(
   const name = String(g?.name ?? "");
   const totalMember = Number(g?.totalMember ?? 0);
 
-  // Đường nhanh: nếu currentMems có sẵn (nhóm nhỏ) → dùng luôn.
+  // Đường nhanh: nếu currentMems có đủ member (nhóm nhỏ) → dùng luôn.
   const currentMems: any[] = Array.isArray(g?.currentMems) ? g.currentMems : [];
-  if (currentMems.length > 0) {
-    const members = currentMems.map((m) => {
-      const id = String(m?.id ?? "");
-      return { id, displayName: String(m?.dName ?? m?.zaloName ?? ""), role: roleOf(id, creatorId, adminIds) };
-    });
-    return { groupId, name, totalMember: totalMember || members.length, members };
+  const currentMembers = currentMems.map((m) => {
+    const id = String(m?.id ?? "");
+    return { id, displayName: String(m?.dName ?? m?.zaloName ?? ""), role: roleOf(id, creatorId, adminIds) };
+  });
+  if (currentMembers.length > 0 && (totalMember === 0 || currentMembers.length >= totalMember)) {
+    return { groupId, name, totalMember: totalMember || currentMembers.length, members: currentMembers };
+  }
+  if (currentMembers.length > 0) {
+    console.warn(
+      `[zalo] currentMems chỉ có ${currentMembers.length}/${totalMember}; thử lấy đủ bằng memVerList.`,
+    );
   }
 
   // Nhóm lớn: tách id từ memVerList ("<id>_<ver>") rồi lấy profile theo lô.
@@ -257,7 +312,7 @@ export async function getGroupSnapshot(
     .map((x) => String(x).split("_")[0] ?? "")
     .filter((id) => id !== "");
   if (ids.length === 0) {
-    return { groupId, name, totalMember, members: [] };
+    return { groupId, name, totalMember: totalMember || currentMembers.length, members: currentMembers };
   }
 
   const members: GroupMemberLite[] = [];

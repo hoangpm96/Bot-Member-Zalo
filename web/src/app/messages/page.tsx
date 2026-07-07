@@ -1,8 +1,15 @@
 import Link from "next/link";
-import { Download, MessageSquare, RotateCcw, Search } from "lucide-react";
+import { Download, Image as ImageIcon, MessageSquare, RotateCcw, Search, Video } from "lucide-react";
 import { PageHeader, EmptyState, Card, CardTitle, Button, Input, Stat, Badge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
-import { dbExists, countGroupMessages, listGroupMessages, type MessageFilters } from "@/lib/db";
+import {
+  dbExists,
+  countGroupMessages,
+  listGroupMediaEvents,
+  listGroupMessages,
+  summarizeGroupMedia,
+  type MessageFilters,
+} from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -74,18 +81,21 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
   const filters = parseFilters(params);
   const messages = listGroupMessages(filters);
   const total = countGroupMessages(filters);
+  const media = summarizeGroupMedia(filters);
+  const mediaEvents = listGroupMediaEvents({ ...filters, limit: 50 });
 
   return (
     <div>
       <PageHeader
         title="Tin nhắn"
-        desc="Text message đã lưu từ group để export và tổng hợp nội dung sau này."
+        desc="Text message và metadata ảnh/video đã ghi từ group."
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Stat label="Tin nhắn khớp bộ lọc" value={total} sub={`hiển thị ${messages.length} dòng mới nhất`} />
         <Stat label="Self trong trang" value={messages.filter((m) => m.is_self).length} sub="tin do tài khoản bot gửi" />
-        <Stat label="Nguồn" value="listener" sub="chỉ lưu text message trong group" />
+        <Stat label="Ảnh đã gửi" value={media.imageCount} sub={`${media.imageEvents} message ảnh`} />
+        <Stat label="Video đã gửi" value={media.videoCount} sub={`${media.videoEvents} message video`} />
       </div>
 
       <Card className="mt-6">
@@ -147,6 +157,34 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
           ))}
         </div>
       )}
+
+      <div className="mt-8">
+        <Card>
+          <CardTitle>Ảnh/video gần nhất ({mediaEvents.length})</CardTitle>
+          {mediaEvents.length === 0 ? (
+            <p className="mt-3 text-sm text-[var(--color-muted)]">Chưa có metadata ảnh/video khớp bộ lọc.</p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-2">
+              {mediaEvents.map((event) => (
+                <div
+                  key={event.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] bg-[var(--color-surface-2)] px-3 py-2 text-sm"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    {event.media_type === "image" ? <ImageIcon size={16} /> : <Video size={16} />}
+                    <span className="font-medium text-[var(--color-text)]">{event.display_name || "(không tên)"}</span>
+                    <Badge tone={event.media_type === "image" ? "ok" : "warn"}>
+                      {event.media_type === "image" ? "ảnh" : "video"} x{event.media_count}
+                    </Badge>
+                    <span className="text-[var(--color-muted)]">{fmtDateTime(event.ts)}</span>
+                  </div>
+                  <span className="font-mono text-xs text-[var(--color-muted)]">{event.zalo_user_id}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }

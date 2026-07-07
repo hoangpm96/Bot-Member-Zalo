@@ -51,6 +51,9 @@ export const config = {
   /** In heartbeat listener mỗi N ms. 0 = tắt. */
   listenerHeartbeatMs: readInt("LISTENER_HEARTBEAT_MS", 60_000),
 
+  /** Listener chủ động đồng bộ snapshot member mỗi N ms. 0 = tắt sync chủ động sau startup. */
+  listenerMemberSyncIntervalMs: readInt("LISTENER_MEMBER_SYNC_INTERVAL_MS", 30 * 60 * 1000),
+
   /** Log mỗi N event message/reaction nhận được. 1 = log từng event, 0 = tắt. */
   listenerEventLogEvery: readInt("LISTENER_EVENT_LOG_EVERY", 1),
 

@@ -9,6 +9,7 @@ import {
   finishScanRun,
   getBotState,
   getLatestScanRunByStatus,
+  getMember,
   getMemberStats,
   getScanRun,
   hasCleanupWarning,
@@ -16,16 +17,17 @@ import {
   markCleanupPlanItem,
   markCleanupPlanItemsForRun,
   markMemberLeft,
+  recordMemberEvent,
   recordRemoval,
   releaseLock,
   saveCleanupPlanItems,
   setBotState,
   upsertCleanupWarning,
-  upsertMember,
   type MemberStats,
   type ScanRunRow,
 } from "../db/index.js";
-import { login, getGroupSnapshot, removeGroupMember, sendGroupText, sleep } from "../zalo/client.js";
+import { syncGroupMembers } from "../member-sync.js";
+import { login, removeGroupMember, sendGroupText, sleep } from "../zalo/client.js";
 import {
   answerCallbackQuery,
   editTelegramMessage,
@@ -122,30 +124,10 @@ function buildCandidates(stats: MemberStats[], vipIds: Set<string>, now: number)
   return out;
 }
 
-async function syncGroupMembers(now: number): Promise<number> {
-  if (!config.groupId) {
-    throw new Error("Chưa có GROUP_ID trong .env");
-  }
-
-  const api = await login();
-  const snap = await getGroupSnapshot(api, config.groupId);
-  const activeIds = new Set(snap.members.map((m) => m.id));
-
-  for (const m of snap.members) {
-    if (!m.id) continue;
-    upsertMember({ zaloUserId: m.id, displayName: m.displayName, role: m.role, now });
-  }
-
-  for (const s of getMemberStats()) {
-    if (!activeIds.has(s.zalo_user_id)) markMemberLeft(s.zalo_user_id, now);
-  }
-
-  return snap.totalMember || activeIds.size;
-}
-
 export async function runCleanupWarn(): Promise<void> {
   const now = Date.now();
-  const memberCount = await syncGroupMembers(now);
+  const api = await login();
+  const memberCount = (await syncGroupMembers(api, now, { requestedBy: "cleanup_warn" })).memberCount;
   const runId = createScanRun({
     startedAt: now,
     status: "warned",
@@ -188,7 +170,6 @@ export async function runCleanupWarn(): Promise<void> {
     return;
   }
 
-  const api = await login();
   await sendGroupText(api, config.groupId, text);
   finishScanRun({
     id: runId,
@@ -206,7 +187,8 @@ export async function runMonthlyCleanup(): Promise<void> {
   const now = Date.now();
   ensureWarmupStarted(now);
 
-  const memberCount = await syncGroupMembers(now);
+  const api = await login();
+  const memberCount = (await syncGroupMembers(api, now, { requestedBy: "monthly_cleanup_plan" })).memberCount;
   const runId = createScanRun({
     startedAt: now,
     status: "collecting",
@@ -438,7 +420,7 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
   }
 
   try {
-    const rows = listCleanupPlanItems(scanRunId).filter((x) => x.status !== "removed");
+    const rows = listCleanupPlanItems(scanRunId).filter((x) => x.status === "planned" || x.status === "failed");
     if (rows.length === 0) {
       finishScanRun({
         id: scanRunId,
@@ -451,19 +433,78 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
       return;
     }
 
+    const api = await login();
+    let syncedCount = 0;
+    try {
+      const sync = await syncGroupMembers(api, Date.now(), { requestedBy: `cleanup_execute:${reason}` });
+      syncedCount = sync.memberCount;
+    } catch (e) {
+      const note = `E-sync-before-kick: không sync được member trước khi kick, đã dừng để tránh xoá sai: ${String(e)}`;
+      finishScanRun({
+        id: scanRunId,
+        finishedAt: Date.now(),
+        status: "failed",
+        plannedKicks: rows.length,
+        actualKicks: 0,
+        note,
+      });
+      await maybeSendTelegram(`❌ ${note}`);
+      throw new Error(note);
+    }
+
+    if (syncedCount <= run.target_count) {
+      const now = Date.now();
+      markCleanupPlanItemsForRun({
+        scanRunId,
+        fromStatus: "planned",
+        toStatus: "skipped",
+        error: `Nhóm còn ${syncedCount} thành viên sau sync trước kick (<= target ${run.target_count}).`,
+        now,
+      });
+      markCleanupPlanItemsForRun({
+        scanRunId,
+        fromStatus: "failed",
+        toStatus: "skipped",
+        error: `Nhóm còn ${syncedCount} thành viên sau sync trước kick (<= target ${run.target_count}).`,
+        now,
+      });
+      finishScanRun({
+        id: scanRunId,
+        finishedAt: now,
+        status: "skipped",
+        memberCount: syncedCount,
+        plannedKicks: rows.length,
+        actualKicks: 0,
+        note: `Đã sync trước kick; nhóm còn ${syncedCount} thành viên (<= ${run.target_count}), không kick thêm.`,
+      });
+      await maybeSendTelegram(`ℹ️ Nhóm còn ${syncedCount} thành viên sau sync, không kick thêm.`);
+      return;
+    }
+
     finishScanRun({
       id: scanRunId,
       finishedAt: Date.now(),
       status: "kicking",
+      memberCount: syncedCount,
       plannedKicks: rows.length,
-      note: `Bắt đầu kick (${reason}).`,
+      note: `Bắt đầu kick (${reason}) sau sync member thành công.`,
     });
 
-    const api = await login();
     let actual = 0;
     const removedNames: string[] = [];
-    try {
-      for (const c of rows) {
+    for (const c of rows) {
+      const active = getMember(c.zalo_user_id);
+      if (!active || active.is_active !== 1) {
+        markCleanupPlanItem({
+          id: c.id,
+          status: "skipped",
+          error: "Không còn active sau sync trước kick.",
+          now: Date.now(),
+        });
+        continue;
+      }
+
+      try {
         await removeGroupMember(api, config.groupId, c.zalo_user_id);
         const removedAt = Date.now();
         recordRemoval({
@@ -475,6 +516,15 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
           removedAt,
         });
         markMemberLeft(c.zalo_user_id, removedAt);
+        recordMemberEvent({
+          zaloUserId: c.zalo_user_id,
+          displayName: c.display_name,
+          role: "member",
+          eventType: "removed",
+          source: "bot_cleanup",
+          ts: removedAt,
+          note: `scan_run #${scanRunId}`,
+        });
         markCleanupPlanItem({ id: c.id, status: "removed", now: removedAt });
         actual += 1;
         removedNames.push(`${c.display_name || c.zalo_user_id} (${c.interaction_count})`);
@@ -482,24 +532,21 @@ async function executeScanRun(scanRunId: number, reason: string): Promise<void> 
         // Giữ lock "tươi" trong lúc kick dài để không bị coi là stale.
         setBotState(KICK_LOCK_KEY, String(Date.now()), Date.now());
         if (actual < rows.length) await sleep(runtimeConfig.kickThrottleMs);
+      } catch (e) {
+        markCleanupPlanItem({ id: c.id, status: "failed", error: String(e), now: Date.now() });
+        const note = `E-cleanup-001: đã xoá ${actual}/${rows.length}, lỗi: ${String(e)}`;
+        finishScanRun({
+          id: scanRunId,
+          finishedAt: Date.now(),
+          status: "failed",
+          memberCount: countActiveMembers(),
+          plannedKicks: rows.length,
+          actualKicks: actual,
+          note,
+        });
+        await maybeSendTelegram(`❌ ${note}\nReply /retry để tiếp tục.`);
+        throw new Error(note);
       }
-    } catch (e) {
-      const failed = rows[actual];
-      if (failed) {
-        markCleanupPlanItem({ id: failed.id, status: "failed", error: String(e), now: Date.now() });
-      }
-      const note = `E-cleanup-001: đã xoá ${actual}/${rows.length}, lỗi: ${String(e)}`;
-      finishScanRun({
-        id: scanRunId,
-        finishedAt: Date.now(),
-        status: "failed",
-        memberCount: countActiveMembers(),
-        plannedKicks: rows.length,
-        actualKicks: actual,
-        note,
-      });
-      await maybeSendTelegram(`❌ ${note}\nReply /retry để tiếp tục.`);
-      throw new Error(note);
     }
 
     finishScanRun({

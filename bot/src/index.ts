@@ -2,7 +2,9 @@ import { runListener } from "./listener.js";
 import { runExportMembers } from "./commands/export-members.js";
 import { runListGroups } from "./commands/list-groups.js";
 import { runCleanupWarn, runMonthlyCleanup, runTelegramPoll } from "./commands/monthly-cleanup.js";
+import { runCheckPermissions } from "./commands/check-permissions.js";
 import { runImportInteractions } from "./commands/import-interactions.js";
+import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
 
@@ -11,6 +13,7 @@ import { runTelegramTest } from "./commands/telegram-test.js";
  *   start          → chạy listener keep-alive (tài khoản phụ). Ghi tương tác real-time.
  *   export-members → xuất danh sách member ra CSV để tra ID cho VIP list.
  *   import-interactions → import vote/manual interactions từ CSV/JSON.
+ *   sync-members  → đồng bộ danh sách member hiện tại từ Zalo về DB.
  *   cleanup-warn   → cảnh báo group ngày 25 (dry-run mặc định).
  *   monthly-cleanup → lập kế hoạch/kick định kỳ (dry-run mặc định).
  *   telegram-poll  → xử lý Telegram approval/cancel/retry/timeout.
@@ -25,6 +28,8 @@ Cách dùng:
   npm start                 # chạy listener (tài khoản co-admin) — ghi tương tác liên tục
   npm run export-members    # xuất danh sách member ra CSV (tra ID cho VIP list)
   npm run import-interactions -- ./data/manual-votes.csv
+  npm run sync-members      # đồng bộ member hiện tại từ Zalo → DB
+  npm run check-permissions # kiểm tra quyền bot trong group (không kick/xoá thật)
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
   npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
@@ -47,6 +52,12 @@ async function main(): Promise<void> {
       break;
     case "import-interactions":
       runImportInteractions(process.argv[3]);
+      break;
+    case "sync-members":
+      await runSyncMembers();
+      break;
+    case "check-permissions":
+      await runCheckPermissions();
       break;
     case "sync-votes":
       await runSyncVotes();

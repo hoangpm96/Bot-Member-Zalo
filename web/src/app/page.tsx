@@ -1,4 +1,5 @@
 import { LayoutDashboard } from "lucide-react";
+import fs from "node:fs";
 import { Stat, PageHeader, Card, CardTitle, EmptyState, RunStatusBadge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import {
@@ -8,9 +9,16 @@ import {
   countInteractions,
   listScanRuns,
   getState,
+  getLatestMemberSyncRun,
+  getBotHealth,
+  getPermissionCheckStatus,
 } from "@/lib/db";
 import { readConfig } from "@/lib/config";
 import { CONFIG_DEFAULTS } from "@/lib/config-meta";
+import { memberSyncRequestPath, permissionCheckRequestPath } from "@/lib/login-status";
+import { SyncMembersCard } from "./sync-members-card";
+import { BotHealthCard } from "./bot-health-card";
+import { PermissionCheckCard } from "./permission-check-card";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +54,11 @@ export default function DashboardPage() {
   const warmup = warmupInfo(warmupDays);
   const overTarget = Math.max(0, total - target);
   const runs = listScanRuns(5);
+  const latestSync = getLatestMemberSyncRun() ?? null;
+  const syncPending = fs.existsSync(memberSyncRequestPath());
+  const health = getBotHealth();
+  const permission = getPermissionCheckStatus();
+  const permissionPending = fs.existsSync(permissionCheckRequestPath());
 
   return (
     <div>
@@ -60,6 +73,15 @@ export default function DashboardPage() {
           sub={warmup.startedAt ? `đã thu thập ${warmup.collected}/${warmupDays} ngày` : "chưa bắt đầu (bot chưa chạy)"}
         />
         <Stat label="Tổng lượt tương tác đã ghi" value={interactions} sub="chat + reaction + vote" />
+      </div>
+
+      <div className="mt-8">
+        <SyncMembersCard initialLatest={latestSync} initialPending={syncPending} />
+      </div>
+
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <BotHealthCard health={health} />
+        <PermissionCheckCard initialLatest={permission} initialPending={permissionPending} />
       </div>
 
       <div className="mt-8">

@@ -18,6 +18,43 @@ CREATE TABLE IF NOT EXISTS members (
 
 CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active);
 
+-- Lịch sử đồng bộ member từ Zalo về DB.
+CREATE TABLE IF NOT EXISTS member_sync_runs (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  requested_by   TEXT NOT NULL DEFAULT 'system',
+  started_at     INTEGER NOT NULL,
+  finished_at    INTEGER,
+  status         TEXT NOT NULL,
+  group_id       TEXT,
+  group_name     TEXT,
+  member_count   INTEGER,
+  snapshot_count INTEGER,
+  upserted       INTEGER,
+  marked_left    INTEGER,
+  error          TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_sync_runs_started ON member_sync_runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_member_sync_runs_status ON member_sync_runs(status);
+
+-- Audit join/leave/remove/reactivate. source: listener | snapshot_sync | bot_cleanup | moderation.
+CREATE TABLE IF NOT EXISTS member_events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  zalo_user_id   TEXT NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  role           TEXT,
+  event_type     TEXT NOT NULL,
+  source         TEXT NOT NULL,
+  sync_run_id    INTEGER,
+  ts             INTEGER NOT NULL,
+  note           TEXT,
+  FOREIGN KEY (sync_run_id) REFERENCES member_sync_runs(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_events_ts ON member_events(ts);
+CREATE INDEX IF NOT EXISTS idx_member_events_user_ts ON member_events(zalo_user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_member_events_type ON member_events(event_type);
+
 -- Log tương tác (append-only). Mỗi event 1 row, KHÔNG update/overwrite.
 -- type: 'message' | 'reaction' | 'vote' | 'manual'.
 -- source: 'listener' (real-time) | 'manual' (import CSV/JSON từ poll/vote cũ).
@@ -56,6 +93,28 @@ CREATE TABLE IF NOT EXISTS group_messages (
 CREATE INDEX IF NOT EXISTS idx_group_messages_ts ON group_messages(ts);
 CREATE INDEX IF NOT EXISTS idx_group_messages_user_ts ON group_messages(zalo_user_id, ts);
 
+-- Metadata ảnh/video trong group. Không lưu URL/file/media binary, chỉ lưu loại + số lượng.
+CREATE TABLE IF NOT EXISTS group_media_events (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id      TEXT NOT NULL,
+  message_id     TEXT NOT NULL,
+  zalo_user_id   TEXT NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  media_type     TEXT NOT NULL,
+  media_count    INTEGER NOT NULL DEFAULT 1,
+  msg_type       TEXT NOT NULL DEFAULT '',
+  ts             INTEGER NOT NULL,
+  is_self        INTEGER NOT NULL DEFAULT 0,
+  source         TEXT NOT NULL DEFAULT 'listener',
+  created_at     INTEGER NOT NULL,
+  FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
+  UNIQUE (thread_id, message_id, media_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_media_events_ts ON group_media_events(ts);
+CREATE INDEX IF NOT EXISTS idx_group_media_events_user_ts ON group_media_events(zalo_user_id, ts);
+CREATE INDEX IF NOT EXISTS idx_group_media_events_type_ts ON group_media_events(media_type, ts);
+
 -- Các kỳ quét/dọn dẹp.
 CREATE TABLE IF NOT EXISTS scan_runs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,6 +148,37 @@ CREATE TABLE IF NOT EXISTS cleanup_plan_items (
 
 CREATE INDEX IF NOT EXISTS idx_cleanup_plan_run_status
   ON cleanup_plan_items(scan_run_id, status);
+
+-- Plan nháp do dashboard lưu từ trang Ứng viên để so sánh trước khi cleanup thật.
+CREATE TABLE IF NOT EXISTS cleanup_draft_plans (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at        INTEGER NOT NULL,
+  target_count      INTEGER NOT NULL,
+  member_count      INTEGER NOT NULL,
+  over_target       INTEGER NOT NULL,
+  max_kicks         INTEGER NOT NULL,
+  candidate_count   INTEGER NOT NULL,
+  grace_count       INTEGER NOT NULL,
+  removable_count   INTEGER NOT NULL,
+  note              TEXT
+);
+
+CREATE TABLE IF NOT EXISTS cleanup_draft_plan_items (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  draft_plan_id      INTEGER NOT NULL,
+  zalo_user_id       TEXT NOT NULL,
+  display_name       TEXT NOT NULL DEFAULT '',
+  interaction_count  INTEGER NOT NULL DEFAULT 0,
+  last_interaction   INTEGER,
+  warning_count      INTEGER NOT NULL DEFAULT 0,
+  rank               INTEGER NOT NULL,
+  action             TEXT NOT NULL,
+  reason             TEXT NOT NULL DEFAULT '',
+  FOREIGN KEY (draft_plan_id) REFERENCES cleanup_draft_plans(id),
+  UNIQUE (draft_plan_id, zalo_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cleanup_draft_items_plan ON cleanup_draft_plan_items(draft_plan_id, rank);
 
 -- Ai bị kick (Milestone 2). M1 chỉ tạo bảng.
 CREATE TABLE IF NOT EXISTS removals (
