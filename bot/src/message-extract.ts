@@ -59,15 +59,17 @@ export function extractText(payload: any): string | null {
     const text = content.trim();
     return text ? text : null;
   }
-  // Link/recommend: content là object TAttachmentContent { title, description, href, ... }.
-  // Ghép thành text để lưu vào group_messages và hiển thị trên /messages.
-  // QUAN TRỌNG: ảnh/video cũng dùng chung TAttachmentContent (có href/thumb) nhưng đã được
-  // extractMediaSummary xử lý riêng (group_media_events). Rút text cho ảnh ở đây sẽ double-count
-  // (ghi cả URL ảnh vào text). Nên chỉ rút text khi KHÔNG phải media.
-  if (extractMediaSummary(payload)) return null;
+  // content là object TAttachmentContent { title, description, href, thumb, ... }.
+  // - Link/recommend: rút title + description + href (URL là nội dung chính).
+  // - Ảnh/video có CAPTION: caption nằm ở title/description; href là URL ảnh (KHÔNG lấy,
+  //   tránh ghi link ảnh thành text và double-count với group_media_events). Media đã được
+  //   extractMediaSummary xử lý riêng; ở đây chỉ vớt thêm caption nếu có.
   const obj = parseObjectMaybe(content);
   if (obj) {
-    const parts = [obj.title, obj.description, obj.href]
+    const isMedia = extractMediaSummary(payload) != null;
+    // Với media chỉ lấy caption (title/description); với link lấy cả href.
+    const fields = isMedia ? [obj.title, obj.description] : [obj.title, obj.description, obj.href];
+    const parts = fields
       .filter((v): v is string => typeof v === "string" && v.trim() !== "")
       .map((v) => v.trim());
     if (parts.length > 0) {

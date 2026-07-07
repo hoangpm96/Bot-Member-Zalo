@@ -49,14 +49,38 @@ test("recommend (chat.recommended): cũng rút được", () => {
   assert.equal(extractText(payload), "Danh thiếp — 0900");
 });
 
-test("ảnh (chat.photo): KHÔNG rút text (đi vào media event, tránh double-count)", () => {
+test("ảnh KHÔNG caption (chat.photo, title rỗng): chỉ media, không text", () => {
+  // Payload thật: title/description rỗng, href là URL ảnh, type rỗng.
   const payload = msg({
     msgType: "chat.photo",
-    content: { href: "https://photo-cdn/abc.jpg", thumb: "https://photo-cdn/t.jpg", title: "" },
+    content: {
+      title: "",
+      description: "",
+      href: "https://photo-stal-20.zdn.vn/gr/jpg/x/y.jpg",
+      thumb: "https://photo-stal-20.zdn.vn/gr/jpg/x/y.jpg",
+      childnumber: 0,
+      type: "",
+    },
   });
   assert.equal(extractText(payload), null);
-  const media = extractMediaSummary(payload);
-  assert.deepEqual(media, { type: "image", count: 1 });
+  assert.deepEqual(extractMediaSummary(payload), { type: "image", count: 1 });
+});
+
+test("ảnh CÓ caption (chat.photo, title=caption): lấy caption làm text + media, KHÔNG lấy URL ảnh", () => {
+  // Payload thật: caption nằm ở content.title, href là URL ảnh (không được ghi thành text).
+  const payload = msg({
+    msgType: "chat.photo",
+    content: {
+      title: "test với chú thích",
+      description: "",
+      href: "https://photo-stal-35.zdn.vn/gr/jpg/x/y.jpg",
+      thumb: "https://photo-stal-35.zdn.vn/gr/jpg/x/y.jpg",
+      childnumber: 0,
+      type: "",
+    },
+  });
+  assert.equal(extractText(payload), "test với chú thích");
+  assert.deepEqual(extractMediaSummary(payload), { type: "image", count: 1 });
 });
 
 test("video (chat.video.msg): media, không rút text", () => {
