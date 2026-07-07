@@ -36,6 +36,7 @@ import {
 import { sendTelegramText } from "./telegram.js";
 import { checkBotPermissions } from "./permissions.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
+import { extractText, extractMediaSummary } from "./message-extract.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -71,56 +72,6 @@ function extractTs(payload: any, now: number): number {
   return normalizeTs(payload?.data?.ts ?? payload?.ts) ?? now;
 }
 
-function extractText(payload: any): string | null {
-  const content = payload?.data?.content;
-  if (typeof content !== "string") return null;
-  const text = content.trim();
-  return text ? text : null;
-}
-
-function parseObjectMaybe(raw: unknown): Record<string, unknown> | null {
-  if (raw && typeof raw === "object") return raw as Record<string, unknown>;
-  if (typeof raw !== "string") return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
-  } catch {
-    return null;
-  }
-}
-
-function positiveInt(raw: unknown): number | null {
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.max(1, Math.trunc(n));
-}
-
-function extractMediaSummary(payload: any): { type: "image" | "video"; count: number } | null {
-  const data = payload?.data ?? {};
-  const msgType = String(data?.msgType ?? "").toLowerCase();
-  const content = parseObjectMaybe(data?.content);
-  const params = parseObjectMaybe(content?.params);
-  const contentType = String(content?.type ?? params?.type ?? "").toLowerCase();
-  const rawCount =
-    positiveInt(content?.childnumber) ??
-    positiveInt(content?.childNumber) ??
-    positiveInt(params?.childnumber) ??
-    positiveInt(params?.childNumber) ??
-    positiveInt(params?.count);
-
-  if (msgType.includes("video") || contentType.includes("video")) {
-    return { type: "video", count: rawCount ?? 1 };
-  }
-  if (
-    msgType.includes("photo") ||
-    msgType.includes("image") ||
-    contentType.includes("photo") ||
-    contentType.includes("image")
-  ) {
-    return { type: "image", count: rawCount ?? 1 };
-  }
-  return null;
-}
 
 function extractMessageId(payload: any, sender: string, ts: number, text: string): string {
   const data = payload?.data ?? {};
