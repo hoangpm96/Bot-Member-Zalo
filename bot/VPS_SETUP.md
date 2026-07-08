@@ -129,6 +129,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 Đổi `WEB_PORT` sang số khác thì sửa luôn `proxy_pass` cho khớp, rồi reload nginx.
 
+Sau khi có domain, điền `PUBLIC_ORIGIN=https://bot.example.com` vào `bot/.env` rồi
+`pm2 restart zalo-web --update-env`. Thiếu bước này, các nút ghi trên dashboard (kick
+nhanh, sync member, đăng nhập lại...) sẽ báo lỗi "Origin không hợp lệ" vì Next.js không
+tự nhận ra domain public thật đứng sau nginx.
+
 ## 4. Cài cron tự động riêng lẻ nếu cần
 
 ```bash

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { DbNotReadyError, getBotHealth, getState, isBotHealthFresh } from "@/lib/db";
 import { kickNowRequestPath } from "@/lib/login-status";
+import { isOriginAllowed } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -50,15 +51,8 @@ export async function GET(request: Request) {
 
 /** POST { zaloUserId, displayName, block } → ghi yêu cầu kick 1 người NGAY, không qua duyệt Telegram. */
 export async function POST(request: Request) {
-  const origin = request.headers.get("origin");
-  if (origin) {
-    try {
-      if (new URL(origin).host !== new URL(request.url).host) {
-        return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
-      }
-    } catch {
-      return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
-    }
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
   }
 
   let body: unknown;

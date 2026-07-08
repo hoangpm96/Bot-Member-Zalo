@@ -42,6 +42,10 @@ module.exports = {
         WEB_QR_DIR: sessionDir,
         WEB_DB_PATH: dbPath,
         WEB_VIP_PATH: vipPath,
+        // Domain public thật (vd https://bot.example.com) — dùng để check Origin trên
+        // các API POST, không dựa vào Host mà Next.js thấy được (sai lệch sau reverse
+        // proxy → lỗi "Origin không hợp lệ" dù bấm đúng từ dashboard thật).
+        PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN || "",
       },
     },
   ],
