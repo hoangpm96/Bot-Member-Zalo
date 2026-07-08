@@ -25,6 +25,7 @@ import {
 } from "@/lib/db";
 import { readVip } from "@/lib/vip";
 import { VipToggleButton } from "./vip-toggle-button";
+import { KickNowButton } from "./kick-now-button";
 
 export const dynamic = "force-dynamic";
 
@@ -197,6 +198,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
                 <Th>Thấy lần đầu</Th>
                 <Th>ID</Th>
                 <Th className="text-right">VIP</Th>
+                <Th className="text-right">Kick</Th>
               </tr>
             </thead>
             <tbody>
@@ -247,6 +249,9 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
                   <Td className="font-mono text-xs text-[var(--color-muted)]">{m.zalo_user_id}</Td>
                   <Td className="text-right">
                     <VipToggleButton id={m.zalo_user_id} displayName={m.display_name} isVip={isVip} />
+                  </Td>
+                  <Td className="text-right">
+                    <KickNowButton id={m.zalo_user_id} displayName={m.display_name} role={m.role} isVip={isVip} />
                   </Td>
                 </tr>
                 );

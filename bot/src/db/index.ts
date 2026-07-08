@@ -39,7 +39,7 @@ export function getDb(): Database.Database {
 
 export type MemberRole = "owner" | "admin" | "member";
 export type MemberEventType = "joined" | "left" | "removed" | "blocked" | "reactivated";
-export type MemberEventSource = "listener" | "snapshot_sync" | "bot_cleanup" | "moderation";
+export type MemberEventSource = "listener" | "snapshot_sync" | "bot_cleanup" | "moderation" | "manual_web";
 export type MemberSyncRunStatus = "running" | "done" | "failed";
 export type InteractionType = "message" | "reaction" | "vote" | "manual" | "image" | "video";
 export type InteractionSource = "listener" | "manual" | "poll";
@@ -595,7 +595,7 @@ export function upsertCleanupWarning(input: {
 }
 
 export function recordRemoval(input: {
-  scanRunId: number;
+  scanRunId: number | null;
   zaloUserId: string;
   displayName: string;
   interactionCount: number;

@@ -19,6 +19,7 @@ const QR_IMAGE_PATH = path.join(QR_DIR, "qr.png");
 const RELOGIN_REQUEST_PATH = path.join(QR_DIR, "relogin-request.json");
 const MEMBER_SYNC_REQUEST_PATH = path.join(QR_DIR, "member-sync-request.json");
 const PERMISSION_CHECK_REQUEST_PATH = path.join(QR_DIR, "permission-check-request.json");
+const KICK_NOW_REQUEST_PATH = path.join(QR_DIR, "kick-now-request.json");
 
 export type LoginState =
   | "ready"
@@ -103,4 +104,9 @@ export function memberSyncRequestPath(): string {
 /** Đường dẫn marker để dashboard yêu cầu bot kiểm tra quyền group. */
 export function permissionCheckRequestPath(): string {
   return PERMISSION_CHECK_REQUEST_PATH;
+}
+
+/** Đường dẫn marker để dashboard yêu cầu bot kick 1 người ngay (không qua duyệt Telegram). */
+export function kickNowRequestPath(): string {
+  return KICK_NOW_REQUEST_PATH;
 }

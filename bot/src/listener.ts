@@ -7,6 +7,7 @@ import {
   consumeMemberSyncRequest,
   consumePermissionCheckRequest,
   consumeReloginRequest,
+  consumeKickNowRequest,
   reloginRequestExists,
   hasSavedCredentials,
   writeLoginReadyStatus,
@@ -20,13 +21,17 @@ import {
   markMemberLeft,
   getMember,
   recordMemberEvent,
+  recordRemoval,
   saveGroupMessage,
   saveGroupMediaEvent,
   recordBotError,
   recordModerationAction,
   setBotState,
+  acquireLock,
+  releaseLock,
 } from "./db/index.js";
 import { syncGroupMembers } from "./member-sync.js";
+import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
 import {
   compileBlacklist,
   findBlacklistedWord,
@@ -411,6 +416,100 @@ export async function runListener(): Promise<void> {
           checkedAt,
         );
         console.warn(`[listener] check quyền lỗi: ${String(e)}`);
+      }
+    })();
+  }, 1_000);
+
+  setInterval(() => {
+    const request = consumeKickNowRequest();
+    if (!request) return;
+    void (async () => {
+      const finishedAt0 = Date.now();
+      // Dùng CHUNG khoá với monthly-cleanup: nếu batch đang kick thì kick nhanh phải chờ
+      // lượt sau (dashboard sẽ poll và báo "đang bận"), không được chen ngang.
+      if (!acquireLock(KICK_LOCK_KEY, Date.now(), KICK_LOCK_STALE_MS)) {
+        setBotState(
+          "kick_now_result",
+          JSON.stringify({
+            requestId: request.requestId,
+            zaloUserId: request.zaloUserId,
+            ok: false,
+            error: "Đang có tiến trình kick khác chạy (batch dọn dẹp). Thử lại sau ít phút.",
+            finishedAt: finishedAt0,
+          }),
+          finishedAt0,
+        );
+        return;
+      }
+      try {
+        const active = getMember(request.zaloUserId);
+        if (!active || active.is_active !== 1) {
+          throw new Error("Người này không còn active trong nhóm (có thể đã rời/bị xoá trước đó).");
+        }
+        await removeGroupMember(api, config.groupId, request.zaloUserId);
+        const removedAt = Date.now();
+        let blockError: string | null = null;
+        if (request.block) {
+          try {
+            await blockGroupMember(api, config.groupId, request.zaloUserId);
+          } catch (e) {
+            blockError = String(e);
+          }
+        }
+        recordRemoval({
+          scanRunId: null,
+          zaloUserId: request.zaloUserId,
+          displayName: request.displayName || active.display_name,
+          interactionCount: 0,
+          lastInteraction: null,
+          removedAt,
+        });
+        markMemberLeft(request.zaloUserId, removedAt);
+        recordMemberEvent({
+          zaloUserId: request.zaloUserId,
+          displayName: request.displayName || active.display_name,
+          role: active.role,
+          eventType: "removed",
+          source: "manual_web",
+          ts: removedAt,
+          note: `Kick nhanh từ dashboard bởi ${request.requestedBy}${request.block ? " (kèm chặn tham gia lại)" : ""}`,
+        });
+        console.log(`[listener] Đã kick nhanh (dashboard): ${request.displayName} (${request.zaloUserId}).`);
+        setBotState(
+          "kick_now_result",
+          JSON.stringify({
+            requestId: request.requestId,
+            zaloUserId: request.zaloUserId,
+            ok: true,
+            blocked: request.block && !blockError,
+            blockError,
+            finishedAt: removedAt,
+          }),
+          removedAt,
+        );
+      } catch (e) {
+        const finishedAt = Date.now();
+        recordBotError({
+          source: "listener",
+          code: "kick_now_failed",
+          message: String(e),
+          detail: e instanceof Error ? e.stack : null,
+          now: finishedAt,
+        });
+        setBotState(
+          "kick_now_result",
+          JSON.stringify({
+            requestId: request.requestId,
+            zaloUserId: request.zaloUserId,
+            ok: false,
+            error: String(e),
+            finishedAt,
+          }),
+          finishedAt,
+        );
+        console.warn(`[listener] kick nhanh lỗi: ${String(e)}`);
+      } finally {
+        releaseLock(KICK_LOCK_KEY);
       }
     })();
   }, 1_000);

@@ -399,11 +399,13 @@ export async function runTelegramPoll(): Promise<void> {
   }
 }
 
-/** Khóa chống 2 tiến trình kick chạy chồng (telegram-poll cron mỗi phút). */
-const KICK_LOCK_KEY = "cleanup_kick_lock";
+/** Khóa chống 2 tiến trình kick chạy chồng (telegram-poll cron mỗi phút).
+ *  Export để "kick nhanh" từ dashboard (listener.ts) dùng CHUNG khoá này — tránh kick
+ *  chồng với batch monthly-cleanup đang chạy. */
+export const KICK_LOCK_KEY = "cleanup_kick_lock";
 /** Lock cũ hơn mức này (ms) coi như process trước đã chết → cho phép chiếm lại.
  *  Phải > thời gian 1 batch kick: 50 người × 2 phút = 100 phút → đặt 3 giờ cho an toàn. */
-const KICK_LOCK_STALE_MS = 3 * 60 * 60 * 1000;
+export const KICK_LOCK_STALE_MS = 3 * 60 * 60 * 1000;
 
 async function executeScanRun(scanRunId: number, reason: string): Promise<void> {
   const run = getScanRun(scanRunId);
