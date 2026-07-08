@@ -23,6 +23,8 @@ import {
   type MemberRoleFilter,
   type MemberSort,
 } from "@/lib/db";
+import { readVip } from "@/lib/vip";
+import { VipToggleButton } from "./vip-toggle-button";
 
 export const dynamic = "force-dynamic";
 
@@ -96,6 +98,10 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
   const filters = parseFilters(params);
   const members = listMemberStatsFiltered(filters);
   const summary = summarizeMemberStats(filters);
+  const vipIds = new Set(readVip().map((e) => e.id));
+  const vipExemptCount = members.filter(
+    (m) => m.role === "owner" || m.role === "admin" || vipIds.has(m.zalo_user_id),
+  ).length;
 
   return (
     <div>
@@ -108,7 +114,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
         <Stat
           label="Khớp bộ lọc"
           value={summary.total}
-          sub={`${summary.member} thường · ${summary.admin + summary.owner} miễn kick`}
+          sub={`${summary.total - vipExemptCount} thường · ${vipExemptCount} miễn kick`}
         />
         <Stat
           label="0 tương tác"
@@ -190,21 +196,27 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
                 <Th>Cảnh báo</Th>
                 <Th>Thấy lần đầu</Th>
                 <Th>ID</Th>
+                <Th className="text-right">VIP</Th>
               </tr>
             </thead>
             <tbody>
-              {members.map((m, i) => (
+              {members.map((m, i) => {
+                const isVip = vipIds.has(m.zalo_user_id);
+                return (
                 <tr key={m.zalo_user_id}>
                   <Td className="text-[var(--color-muted)]">{i + 1}</Td>
                   <Td className="font-medium">{m.display_name || "(không tên)"}</Td>
                   <Td>
-                    {m.role === "owner" ? (
-                      <Badge tone="danger">owner</Badge>
-                    ) : m.role === "admin" ? (
-                      <Badge tone="warn">admin</Badge>
-                    ) : (
-                      <Badge tone="muted">thành viên</Badge>
-                    )}
+                    <span className="inline-flex items-center gap-1.5">
+                      {m.role === "owner" ? (
+                        <Badge tone="danger">owner</Badge>
+                      ) : m.role === "admin" ? (
+                        <Badge tone="warn">admin</Badge>
+                      ) : (
+                        <Badge tone="muted">thành viên</Badge>
+                      )}
+                      {isVip ? <Badge tone="ok">VIP</Badge> : null}
+                    </span>
                   </Td>
                   <Td className="text-right">
                     {m.interaction_count === 0 ? (
@@ -233,8 +245,12 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
                     </span>
                   </Td>
                   <Td className="font-mono text-xs text-[var(--color-muted)]">{m.zalo_user_id}</Td>
+                  <Td className="text-right">
+                    <VipToggleButton id={m.zalo_user_id} displayName={m.display_name} isVip={isVip} />
+                  </Td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </Table>
         </div>

@@ -149,3 +149,35 @@ export function EmptyState({ children }: { children: React.ReactNode }) {
     <Card className="text-center text-sm text-[var(--color-muted)]">{children}</Card>
   );
 }
+
+export function Modal({
+  open,
+  onClose,
+  title,
+  children,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+      role="presentation"
+    >
+      <div
+        className="w-full max-w-sm rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <h3 className="text-sm font-semibold text-[var(--color-text)]">{title}</h3>
+        <div className="mt-3">{children}</div>
+      </div>
+    </div>
+  );
+}
