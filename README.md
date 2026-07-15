@@ -21,6 +21,7 @@ Telegram.
 - Giai đoạn warmup trước khi cleanup để tránh đánh giá thiếu dữ liệu.
 - Loại trừ owner, admin, VIP và các trường hợp được bảo vệ.
 - Gửi danh sách cleanup qua Telegram để Duyệt/Hủy.
+- Tùy chọn sao chép message Zalo live sang đúng Telegram forum topic/channel.
 - Dashboard xem thành viên, tương tác, lịch sử, tin nhắn và cấu hình.
 - PM2 và cron setup tự động cho VPS.
 

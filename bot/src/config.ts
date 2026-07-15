@@ -22,6 +22,16 @@ function readBool(name: string, fallback: boolean): boolean {
   return raw === "1" || raw.toLowerCase() === "true";
 }
 
+function readOptionalPositiveInt(name: string): number | null {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return null;
+  const n = Number(raw);
+  if (!Number.isSafeInteger(n) || n <= 0) {
+    throw new Error(`Env ${name} phải là số nguyên dương, nhận được: "${raw}"`);
+  }
+  return n;
+}
+
 const sessionDir = process.env.SESSION_DIR?.trim() || "./data";
 
 export const config = {
@@ -77,6 +87,18 @@ export const config = {
 
   /** Telegram chat id admin nhận approval/report. */
   telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || "",
+
+  /** Bật sao chép message Zalo live sang một Telegram chat/channel/topic riêng. */
+  telegramForwardEnabled: readBool("TELEGRAM_FORWARD_ENABLED", false),
+
+  /** Bot Telegram riêng chỉ dùng cho luồng forward Zalo, không dùng chung bot notification. */
+  telegramForwardBotToken: process.env.TELEGRAM_FORWARD_BOT_TOKEN?.trim() || "",
+
+  /** ID supergroup/channel nhận message Zalo. Tách khỏi chat admin dùng để duyệt cleanup. */
+  telegramForwardChatId: process.env.TELEGRAM_FORWARD_CHAT_ID?.trim() || "",
+
+  /** message_thread_id của forum topic. Để trống nếu đích là channel/chat thường. */
+  telegramForwardTopicId: readOptionalPositiveInt("TELEGRAM_FORWARD_TOPIC_ID"),
 
   /** Timeout chờ duyệt cleanup qua Telegram (brainstorm: 48h). */
   approvalTimeoutHours: readInt("APPROVAL_TIMEOUT_HOURS", 48),

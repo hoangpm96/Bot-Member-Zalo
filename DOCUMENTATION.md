@@ -440,6 +440,10 @@ biến quan trọng:
 | `ZALO_THROTTLE_MS`      | Nghỉ giữa các call Zalo nặng                           |
 | `VIP_LIST_PATH`         | File JSON danh sách trắng                              |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Bắt buộc để bật bước duyệt + kick    |
+| `TELEGRAM_FORWARD_ENABLED` | `1` = sao chép message Zalo live sang Telegram          |
+| `TELEGRAM_FORWARD_BOT_TOKEN` | Token bot riêng cho forward, tách khỏi bot notification |
+| `TELEGRAM_FORWARD_CHAT_ID` | Supergroup/channel riêng nhận message forward           |
+| `TELEGRAM_FORWARD_TOPIC_ID`| `message_thread_id` của forum topic; trống nếu chat thường/channel |
 | `APPROVAL_TIMEOUT_HOURS`| Không phản hồi sau N giờ thì tự tiến hành (mặc định 48)|
 | `WEB_PORT`              | Port dashboard (PM2 đọc; để trống = 3000)              |
 
@@ -469,6 +473,8 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 | `npm run health-check`        | Báo Telegram nếu bot heartbeat stale/hồi phục         |
 | `npm run sync-votes`          | Đọc voter trong poll → ghi tương tác                  |
 | `npm run telegram-test`       | Gửi tin thử để kiểm Telegram token + chat id          |
+| `npm run telegram-find-topic` | Tìm chat ID và topic ID từ một message Telegram mới   |
+| `npm run telegram-forward-test` | Gửi thử vào đích forward đã cấu hình                |
 | `npm run cleanup-warn`        | Cảnh báo group (DRY_RUN=1 chỉ in)                     |
 | `npm run monthly-cleanup`     | Lập danh sách / kick (DRY_RUN=1 chỉ in)               |
 | `npm run telegram-poll`       | Xử lý duyệt/huỷ/retry/timeout Telegram                |

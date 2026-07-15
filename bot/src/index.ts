@@ -8,6 +8,7 @@ import { runImportInteractions } from "./commands/import-interactions.js";
 import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
+import { runTelegramFindTopic, runTelegramForwardTest } from "./commands/telegram-forward.js";
 import { recordBotError } from "./db/index.js";
 
 /**
@@ -35,6 +36,8 @@ Cách dùng:
   npm run health-check      # cron: báo Telegram nếu bot heartbeat stale
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
   npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
+  npm run telegram-find-topic # tìm chat ID + forum topic ID từ một message mới
+  npm run telegram-forward-test # gửi thử vào đúng đích forward Zalo
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
@@ -70,6 +73,12 @@ async function main(): Promise<void> {
       break;
     case "telegram-test":
       await runTelegramTest();
+      break;
+    case "telegram-find-topic":
+      await runTelegramFindTopic();
+      break;
+    case "telegram-forward-test":
+      await runTelegramForwardTest();
       break;
     case "cleanup-warn":
       await runCleanupWarn();

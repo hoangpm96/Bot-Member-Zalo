@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractText, extractMediaSummary } from "./message-extract.js";
+import { extractText, extractMediaSummary, extractMediaUrl } from "./message-extract.js";
 
 /**
  * Test rút text/media từ payload zca-js. Chạy: npm test.
@@ -64,6 +64,7 @@ test("ảnh KHÔNG caption (chat.photo, title rỗng): chỉ media, không text"
   });
   assert.equal(extractText(payload), null);
   assert.deepEqual(extractMediaSummary(payload), { type: "image", count: 1 });
+  assert.equal(extractMediaUrl(payload), "https://photo-stal-20.zdn.vn/gr/jpg/x/y.jpg");
 });
 
 test("ảnh CÓ caption (chat.photo, title=caption): lấy caption làm text + media, KHÔNG lấy URL ảnh", () => {
@@ -87,6 +88,18 @@ test("video (chat.video.msg): media, không rút text", () => {
   const payload = msg({ msgType: "chat.video.msg", content: { href: "https://v/abc.mp4" } });
   assert.equal(extractText(payload), null);
   assert.deepEqual(extractMediaSummary(payload), { type: "video", count: 1 });
+  assert.equal(extractMediaUrl(payload), "https://v/abc.mp4");
+});
+
+test("media URL: đọc params JSON và bỏ URL không phải http(s)", () => {
+  const fromParams = msg({
+    msgType: "chat.photo",
+    content: { href: "", params: JSON.stringify({ hdUrl: "https://cdn.example/a.jpg" }) },
+  });
+  assert.equal(extractMediaUrl(fromParams), "https://cdn.example/a.jpg");
+
+  const unsafe = msg({ msgType: "chat.photo", content: { href: "file:///tmp/a.jpg" } });
+  assert.equal(extractMediaUrl(unsafe), null);
 });
 
 test("ảnh nhiều tấm: đếm childnumber", () => {

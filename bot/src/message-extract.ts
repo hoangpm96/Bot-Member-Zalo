@@ -53,6 +53,28 @@ export function extractMediaSummary(payload: any): { type: "image" | "video"; co
   return null;
 }
 
+/** URL media tạm do Zalo trả về; Telegram có thể dùng URL này để tải ảnh/video. */
+export function extractMediaUrl(payload: any): string | null {
+  if (extractMediaSummary(payload) === null) return null;
+  const content = parseObjectMaybe(payload?.data?.content);
+  const params = parseObjectMaybe(content?.params);
+  const candidates = [
+    content?.href,
+    content?.hdUrl,
+    content?.url,
+    params?.href,
+    params?.hdUrl,
+    params?.url,
+    content?.thumb,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const value = candidate.trim();
+    if (/^https?:\/\//i.test(value)) return value;
+  }
+  return null;
+}
+
 export function extractText(payload: any): string | null {
   const content = payload?.data?.content;
   if (typeof content === "string") {

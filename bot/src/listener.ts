@@ -41,7 +41,11 @@ import {
 import { sendTelegramText } from "./telegram.js";
 import { checkBotPermissions } from "./permissions.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
-import { extractText, extractMediaSummary } from "./message-extract.js";
+import { extractText, extractMediaSummary, extractMediaUrl } from "./message-extract.js";
+import {
+  forwardZaloMessageToTelegram,
+  isTelegramForwardConfigured,
+} from "./telegram-forward.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -533,6 +537,14 @@ export async function runListener(): Promise<void> {
   let socketState: "starting" | "connected" | "disconnected" | "closed" | "error" = "starting";
   let lastSocketError: string | null = null;
   const processStartedAt = Date.now();
+  // Một queue nối tiếp giữ đúng thứ tự Zalo và tránh bắn đồng thời quá nhiều request Telegram.
+  let telegramForwardQueue = Promise.resolve();
+
+  function enqueueTelegramForward(input: Parameters<typeof forwardZaloMessageToTelegram>[0]): void {
+    telegramForwardQueue = telegramForwardQueue
+      .then(() => forwardZaloMessageToTelegram(input))
+      .catch((e) => console.warn(`[telegram-forward] gửi lỗi: ${String(e)}`));
+  }
 
   function writeHealth(reason: string): void {
     const nowHealth = Date.now();
@@ -609,6 +621,16 @@ export async function runListener(): Promise<void> {
           ts,
           isSelf: Boolean(payload?.isSelf),
           now: Date.now(),
+        });
+      }
+      if (isTelegramForwardConfigured()) {
+        enqueueTelegramForward({
+          senderId: sender,
+          displayName,
+          text,
+          msgType: String(payload?.data?.msgType ?? ""),
+          media: media ? { ...media, url: extractMediaUrl(payload) } : null,
+          ts,
         });
       }
     }
@@ -737,6 +759,22 @@ export async function runListener(): Promise<void> {
     );
   } else {
     console.log("[moderation] TẮT (bật trong dashboard /settings để lọc từ khoá).");
+  }
+
+  if (config.telegramForwardEnabled) {
+    if (isTelegramForwardConfigured()) {
+      const topic = config.telegramForwardTopicId ?? "chat/channel chính";
+      console.log(
+        `[telegram-forward] BẬT — đích=${config.telegramForwardChatId}, topic=${topic}.`,
+      );
+    } else {
+      console.warn(
+        "[telegram-forward] Đã bật nhưng thiếu TELEGRAM_FORWARD_BOT_TOKEN hoặc " +
+          "TELEGRAM_FORWARD_CHAT_ID — tạm không forward.",
+      );
+    }
+  } else {
+    console.log("[telegram-forward] TẮT (TELEGRAM_FORWARD_ENABLED=0).");
   }
 
   if (config.listenerHeartbeatMs > 0) {
