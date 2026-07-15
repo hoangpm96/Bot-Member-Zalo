@@ -151,6 +151,8 @@ pm2 restart zalo-bot --update-env   # production
 Text/link được gửi dạng text; ảnh/video được Telegram tải từ URL CDN tạm của
 Zalo. Nếu Telegram không tải được media, bot gửi phần mô tả dạng text để message
 không bị mất hoàn toàn. Tin được xếp hàng tuần tự để giữ thứ tự nhận từ Zalo.
+Message dùng format gọn `<Tên người gửi>: <nội dung>`; không kèm nguồn/thời gian
+vì listener chuyển gần như tức thời.
 `TELEGRAM_BOT_TOKEN` cũ tiếp tục dành cho notification/approval; bot forward dùng
 riêng `TELEGRAM_FORWARD_BOT_TOKEN`, nên hai luồng không tranh update của nhau.
 

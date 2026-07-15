@@ -69,6 +69,7 @@ export async function sendTelegramText(
   text: string,
   destination?: TelegramDestination,
   botToken = config.telegramBotToken,
+  parseMode?: "HTML",
 ): Promise<void> {
   if (!destination) assertTelegramAdminConfigured();
   await telegramCall("sendMessage", {
@@ -78,6 +79,7 @@ export async function sendTelegramText(
       : {}),
     text,
     disable_web_page_preview: true,
+    ...(parseMode ? { parse_mode: parseMode } : {}),
   }, botToken);
 }
 
@@ -88,6 +90,7 @@ export async function sendTelegramMedia(input: {
   caption: string;
   destination: TelegramDestination;
   botToken?: string;
+  parseMode?: "HTML";
 }): Promise<void> {
   const mediaField = input.type === "image" ? "photo" : "video";
   await telegramCall(input.type === "image" ? "sendPhoto" : "sendVideo", {
@@ -97,6 +100,7 @@ export async function sendTelegramMedia(input: {
       : {}),
     [mediaField]: input.url,
     caption: input.caption,
+    ...(input.parseMode ? { parse_mode: input.parseMode } : {}),
   }, input.botToken ?? config.telegramBotToken);
 }
 

@@ -18,6 +18,13 @@ function truncate(value: string, max: number): string {
   return `${value.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
+function escapeTelegramHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function destination(): TelegramDestination {
   if (!config.telegramForwardBotToken || !config.telegramForwardChatId) {
     throw new Error(
@@ -43,7 +50,8 @@ export function isTelegramForwardConfigured(): boolean {
 function mediaLabel(media: ZaloForwardMessage["media"]): string {
   if (!media) return "";
   const noun = media.type === "image" ? "ảnh" : "video";
-  return media.count > 1 ? `📎 Album ${media.count} ${noun}` : `📎 1 ${noun}`;
+  const icon = media.type === "image" ? "🖼️" : "🎬";
+  return media.count > 1 ? `${icon} ${media.count} ${noun}` : `${icon} ${noun}`;
 }
 
 function unsupportedLabel(msgType: string): string {
@@ -52,15 +60,19 @@ function unsupportedLabel(msgType: string): string {
   if (type.includes("voice")) return "🎤 Tin nhắn thoại";
   if (type.includes("location")) return "📍 Vị trí";
   if (type.includes("file")) return "📁 Tệp đính kèm";
-  return msgType ? `📎 Tin nhắn dạng ${msgType}` : "📎 Tin nhắn không có nội dung text";
+  if (type.includes("poll")) return "📊 Bình chọn";
+  return "📎 Nội dung đính kèm";
 }
 
-/** Format thuần text để không phải tin tưởng/escape HTML từ nội dung Zalo. */
+/** Format HTML tối giản: tên người gửi in đậm, nội dung nằm ngay sau dấu hai chấm. */
 export function formatZaloForward(input: ZaloForwardMessage): string {
-  const sender = input.displayName.trim() || input.senderId;
-  const sentAt = new Date(input.ts).toLocaleString("vi-VN", { hour12: false });
-  const body = [input.text, mediaLabel(input.media)].filter(Boolean).join("\n");
-  return `💬 Zalo · ${sender}\n🕒 ${sentAt}\n\n${body || unsupportedLabel(input.msgType)}`;
+  const sender = escapeTelegramHtml(input.displayName.trim() || input.senderId);
+  const body = [input.text, mediaLabel(input.media)]
+    .filter(Boolean)
+    .map((part) => escapeTelegramHtml(String(part)))
+    .join("\n");
+  const content = body || escapeTelegramHtml(unsupportedLabel(input.msgType));
+  return `<b>${sender}:</b> ${content}`;
 }
 
 /**
@@ -77,15 +89,17 @@ export async function forwardZaloMessageToTelegram(input: ZaloForwardMessage): P
         caption: truncate(formatted, TELEGRAM_CAPTION_LIMIT),
         destination: destination(),
         botToken: config.telegramForwardBotToken,
+        parseMode: "HTML",
       });
     } catch (e) {
       // CDN Zalo có thể chặn Telegram hoặc media vượt giới hạn Bot API. Khi đó vẫn
       // chuyển nội dung/cảnh báo dưới dạng text thay vì làm mất toàn bộ message.
-      const fallback = `${formatted}\n\n⚠️ Không tải được media: ${String(e)}`;
+      const fallback = `${formatted}\n⚠️ Không tải được media: ${escapeTelegramHtml(String(e))}`;
       await sendTelegramText(
         truncate(fallback, TELEGRAM_TEXT_LIMIT),
         destination(),
         config.telegramForwardBotToken,
+        "HTML",
       );
     }
     return;
@@ -94,5 +108,6 @@ export async function forwardZaloMessageToTelegram(input: ZaloForwardMessage): P
     truncate(formatted, TELEGRAM_TEXT_LIMIT),
     destination(),
     config.telegramForwardBotToken,
+    "HTML",
   );
 }

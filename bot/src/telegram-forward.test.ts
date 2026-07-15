@@ -11,8 +11,7 @@ test("format forward gồm nguồn, người gửi, text và media", () => {
     media: { type: "image", count: 2, url: "https://example/a.jpg" },
     ts: new Date("2026-07-15T03:30:00.000Z").getTime(),
   });
-  assert.match(result, /^💬 Zalo · Nguyễn An/m);
-  assert.match(result, /Chào nhóm\n📎 Album 2 ảnh/);
+  assert.equal(result, "<b>Nguyễn An:</b> Chào nhóm\n🖼️ 2 ảnh");
 });
 
 test("format forward dùng sender id và mô tả sticker khi thiếu text", () => {
@@ -24,6 +23,17 @@ test("format forward dùng sender id và mô tả sticker khi thiếu text", () 
     media: null,
     ts: 0,
   });
-  assert.match(result, /^💬 Zalo · 456/m);
-  assert.match(result, /🏷️ Sticker$/);
+  assert.equal(result, "<b>456:</b> 🏷️ Sticker");
+});
+
+test("format forward escape HTML từ tên và nội dung Zalo", () => {
+  const result = formatZaloForward({
+    senderId: "789",
+    displayName: "A <B>",
+    text: "x < y & z > 0",
+    msgType: "webchat",
+    media: null,
+    ts: 0,
+  });
+  assert.equal(result, "<b>A &lt;B&gt;:</b> x &lt; y &amp; z &gt; 0");
 });
