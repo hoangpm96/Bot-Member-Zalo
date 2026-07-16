@@ -34,10 +34,14 @@ export function middleware(request: NextRequest) {
   if (requestHost !== publicHost) return NextResponse.next();
 
   const { pathname } = request.nextUrl;
-  if (pathname === "/") {
-    const destination = request.nextUrl.clone();
-    destination.pathname = "/leaderboard";
-    const response = NextResponse.rewrite(destination);
+  const internalLeaderboardRequest =
+    request.headers.get("x-public-leaderboard") === "1";
+
+  // Nginx public root đổi URI nội bộ / -> /leaderboard và gắn header này.
+  // Không dùng NextResponse.rewrite vì URL mà Next thấy sau reverse proxy có thể
+  // là https://localhost:<port>, gây internal TLS request và trả 500.
+  if (pathname === "/leaderboard" && internalLeaderboardRequest) {
+    const response = NextResponse.next();
     response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
     return response;
   }
