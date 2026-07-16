@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { DbNotReadyError } from "@/lib/db";
 import { readModerationConfig, writeModerationConfig } from "@/lib/blacklist";
+import { isOriginAllowed } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ export async function GET() {
 
 /** POST { enabled?, action?, words? } → ghi config kiểm duyệt từ khoá. */
 export async function POST(request: Request) {
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();

@@ -46,6 +46,9 @@ module.exports = {
         // các API POST, không dựa vào Host mà Next.js thấy được (sai lệch sau reverse
         // proxy → lỗi "Origin không hợp lệ" dù bấm đúng từ dashboard thật).
         PUBLIC_ORIGIN: process.env.PUBLIC_ORIGIN || "",
+        // Host public chỉ được xem leaderboard. Middleware của web dùng biến này
+        // để chặn toàn bộ API/trang admin nếu Nginx vô tình proxy quá rộng.
+        PUBLIC_LEADERBOARD_HOST: process.env.PUBLIC_LEADERBOARD_HOST || "",
       },
     },
   ],

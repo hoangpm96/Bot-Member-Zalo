@@ -1,0 +1,114 @@
+# Đặt hai directive zone này trong block `http {}` của /etc/nginx/nginx.conf.
+limit_req_zone $binary_remote_addr zone=leaderboard_rate:10m rate=2r/s;
+limit_conn_zone $binary_remote_addr zone=leaderboard_conn:10m;
+server_tokens off;
+
+# Dùng chung cho cả hai server block bên dưới.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# Admin: luôn yêu cầu Basic Auth.
+server {
+    listen 443 ssl http2;
+    server_name bot.bahub.vn;
+
+    # Giữ nguyên ssl_certificate / ssl_certificate_key do Certbot quản lý.
+
+    client_max_body_size 1m;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+
+    location / {
+        auth_basic "Bot Member Zalo";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+
+        proxy_pass http://127.0.0.1:5831;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}
+
+# Public: chỉ leaderboard và tài nguyên frontend cần thiết.
+server {
+    listen 443 ssl http2;
+    server_name leaderboard.bahub.vn;
+
+    # Cấp certificate riêng hoặc certificate gồm cả hai SAN.
+
+    client_max_body_size 16k;
+    limit_req_status 429;
+    limit_conn_status 429;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+    add_header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" always;
+
+    if ($request_method !~ ^(GET|HEAD)$) {
+        return 405;
+    }
+
+    location = / {
+        return 307 https://leaderboard.bahub.vn/leaderboard;
+    }
+
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    location = /leaderboard {
+        limit_req zone=leaderboard_rate burst=10 nodelay;
+        limit_conn leaderboard_conn 10;
+
+        proxy_pass http://127.0.0.1:5831;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /leaderboard/ {
+        return 308 https://leaderboard.bahub.vn/leaderboard$is_args$args;
+    }
+
+    location ^~ /_next/ {
+        limit_req zone=leaderboard_rate burst=30 nodelay;
+
+        proxy_pass http://127.0.0.1:5831;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Không proxy /api, /login, /members, /settings hoặc bất kỳ route nào khác.
+    location / {
+        return 404;
+    }
+}
+
+# HTTP chỉ redirect sang HTTPS. Có thể để Certbot tạo/cập nhật hai block này.
+server {
+    listen 80;
+    server_name bot.bahub.vn leaderboard.bahub.vn;
+    return 301 https://$host$request_uri;
+}

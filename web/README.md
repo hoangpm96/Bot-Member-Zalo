@@ -52,26 +52,18 @@ WEB_VIP_PATH=/đường-dẫn/vip-list.json   # mặc định ../bot/data/vip-li
 
 ## Public leaderboard
 
-Nếu dashboard được bảo vệ bằng Basic Auth ở Nginx, có thể mở riêng leaderboard
-không cần đăng nhập và vẫn giữ toàn bộ trang quản trị phía sau authentication:
+Khuyến nghị dùng hai subdomain:
 
-```nginx
-location = /leaderboard {
-    auth_basic off;
-    proxy_pass http://127.0.0.1:5831;
-}
+- `bot.bahub.vn`: toàn bộ admin, bắt buộc Basic Auth.
+- `leaderboard.bahub.vn`: chỉ public `/leaderboard`, không proxy API hoặc trang admin.
 
-# CSS/JS dùng chung để trang public hiển thị đầy đủ.
-location ^~ /_next/ {
-    auth_basic off;
-    proxy_pass http://127.0.0.1:5831;
-}
+Đặt trong `bot/.env`:
 
-location / {
-    auth_basic "Restricted";
-    auth_basic_user_file /etc/nginx/.htpasswd;
-    proxy_pass http://127.0.0.1:5831;
-}
+```env
+PUBLIC_ORIGIN=https://bot.bahub.vn
+PUBLIC_LEADERBOARD_HOST=leaderboard.bahub.vn
 ```
 
-Giữ HTTPS cho cả hai route. Leaderboard không trả Zalo ID hay nội dung tin nhắn.
+Mẫu Nginx đầy đủ nằm tại `deploy/nginx-bahub.conf.example`. Middleware của web
+cũng áp dụng allowlist theo host để tạo lớp chặn thứ hai nếu Nginx cấu hình nhầm.
+Leaderboard không trả Zalo ID hay nội dung tin nhắn và được đánh dấu `noindex`.

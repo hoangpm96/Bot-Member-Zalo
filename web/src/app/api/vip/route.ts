@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { readVip, writeVip } from "@/lib/vip";
+import { isOriginAllowed } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,10 @@ export async function GET() {
 
 /** POST { entries: [{id, note?}] } → ghi lại toàn bộ VIP list. */
 export async function POST(request: Request) {
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();

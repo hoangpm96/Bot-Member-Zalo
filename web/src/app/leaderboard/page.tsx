@@ -9,6 +9,12 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Bảng xếp hạng tương tác",
   description: "Top 50 thành viên tương tác nhiều nhất trong cộng đồng.",
+  robots: {
+    index: false,
+    follow: false,
+    noarchive: true,
+    nosnippet: true,
+  },
 };
 
 type SearchParams = Record<string, string | string[] | undefined>;
