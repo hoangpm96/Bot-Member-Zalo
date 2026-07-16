@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import "./globals.css";
 import { AppShell } from "./app-shell";
 
@@ -12,11 +13,24 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+function normalizeHost(raw: string | null): string {
+  return (raw ?? "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, "");
+}
+
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const requestHeaders = await headers();
+  const requestHost = normalizeHost(requestHeaders.get("host"));
+  const publicHost = normalizeHost(process.env.PUBLIC_LEADERBOARD_HOST ?? null);
+  const publicMode = publicHost !== "" && requestHost === publicHost;
+
   return (
     <html lang="vi">
       <body>
-        <AppShell>{children}</AppShell>
+        <AppShell publicMode={publicMode}>{children}</AppShell>
       </body>
     </html>
   );

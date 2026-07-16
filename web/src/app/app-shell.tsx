@@ -30,9 +30,16 @@ const NAV = [
   { href: "/login", label: "Đăng nhập", shortLabel: "Đăng nhập", icon: LogIn },
 ];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  children,
+  publicMode = false,
+}: {
+  children: React.ReactNode;
+  publicMode?: boolean;
+}) {
   const pathname = usePathname();
-  const isPublicLeaderboard = pathname === "/leaderboard" || pathname.startsWith("/leaderboard/");
+  const isPublicLeaderboard =
+    publicMode || pathname === "/leaderboard" || pathname.startsWith("/leaderboard/");
 
   if (isPublicLeaderboard) {
     return <main className="min-h-screen">{children}</main>;
