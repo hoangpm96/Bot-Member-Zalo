@@ -55,7 +55,7 @@ WEB_VIP_PATH=/đường-dẫn/vip-list.json   # mặc định ../bot/data/vip-li
 Khuyến nghị dùng hai subdomain:
 
 - `bot.bahub.vn`: toàn bộ admin, bắt buộc Basic Auth.
-- `leaderboard.bahub.vn`: chỉ public `/leaderboard`, không proxy API hoặc trang admin.
+- `leaderboard.bahub.vn`: public leaderboard ngay tại `/`, không proxy API hoặc trang admin.
 
 Đặt trong `bot/.env`:
 

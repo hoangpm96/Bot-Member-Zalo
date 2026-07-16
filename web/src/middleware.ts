@@ -14,8 +14,6 @@ function publicLeaderboardHost(): string {
 
 function isAllowedPublicPath(pathname: string): boolean {
   return (
-    pathname === "/leaderboard" ||
-    pathname === "/leaderboard/" ||
     pathname === "/robots.txt" ||
     pathname === "/favicon.ico" ||
     pathname.startsWith("/_next/")
@@ -37,9 +35,17 @@ export function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   if (pathname === "/") {
-    const destination = new URL(`https://${publicHost}/leaderboard`);
+    const destination = request.nextUrl.clone();
+    destination.pathname = "/leaderboard";
+    const response = NextResponse.rewrite(destination);
+    response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet");
+    return response;
+  }
+
+  if (pathname === "/leaderboard" || pathname === "/leaderboard/") {
+    const destination = new URL(`https://${publicHost}/`);
     destination.search = request.nextUrl.search;
-    return NextResponse.redirect(destination, 307);
+    return NextResponse.redirect(destination, 308);
   }
 
   if (isAllowedPublicPath(pathname)) {

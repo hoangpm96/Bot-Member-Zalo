@@ -69,7 +69,7 @@ export default async function LeaderboardPage({
             return (
               <Link
                 key={item.value}
-                href={`/leaderboard?period=${item.value}`}
+                href={`?period=${item.value}`}
                 className={`rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors ${
                   active
                     ? "bg-[var(--color-primary)] text-white"

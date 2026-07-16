@@ -63,15 +63,6 @@ server {
     }
 
     location = / {
-        return 307 https://leaderboard.bahub.vn/leaderboard;
-    }
-
-    location = /robots.txt {
-        default_type text/plain;
-        return 200 "User-agent: *\nDisallow: /\n";
-    }
-
-    location = /leaderboard {
         limit_req zone=leaderboard_rate burst=10 nodelay;
         limit_conn leaderboard_conn 10;
 
@@ -84,8 +75,17 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    location = /robots.txt {
+        default_type text/plain;
+        return 200 "User-agent: *\nDisallow: /\n";
+    }
+
+    location = /leaderboard {
+        return 308 https://leaderboard.bahub.vn/$is_args$args;
+    }
+
     location = /leaderboard/ {
-        return 308 https://leaderboard.bahub.vn/leaderboard$is_args$args;
+        return 308 https://leaderboard.bahub.vn/$is_args$args;
     }
 
     location ^~ /_next/ {
