@@ -324,6 +324,19 @@ export interface MessageFilters {
   limit?: number;
 }
 
+export type LeaderboardPeriod = "7d" | "30d" | "all";
+
+export interface LeaderboardRow {
+  rank: number;
+  display_name: string;
+  interaction_count: number;
+  message_count: number;
+  reaction_count: number;
+  vote_count: number;
+  other_count: number;
+  last_interaction: number;
+}
+
 // ---- Reads ----
 
 export function countActiveMembers(): number {
@@ -347,6 +360,45 @@ export function countByRole(): { owner: number; admin: number; member: number } 
 export function countInteractions(): number {
   const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
   return r.n;
+}
+
+/**
+ * Bảng xếp hạng public: chỉ trả tên + số liệu tổng hợp, tuyệt đối không trả Zalo ID.
+ * Mỗi row interactions được tính là 1 lượt. Chỉ xếp hạng member còn active.
+ */
+export function listLeaderboard(period: LeaderboardPeriod, limit = 50): LeaderboardRow[] {
+  const now = Date.now();
+  const since =
+    period === "7d"
+      ? now - 7 * 86400000
+      : period === "30d"
+        ? now - 30 * 86400000
+        : 0;
+
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         m.display_name,
+         COUNT(i.id) AS interaction_count,
+         SUM(CASE WHEN i.type = 'message' THEN 1 ELSE 0 END) AS message_count,
+         SUM(CASE WHEN i.type = 'reaction' THEN 1 ELSE 0 END) AS reaction_count,
+         SUM(CASE WHEN i.type = 'vote' THEN 1 ELSE 0 END) AS vote_count,
+         SUM(CASE WHEN i.type NOT IN ('message', 'reaction', 'vote') THEN 1 ELSE 0 END) AS other_count,
+         MAX(i.ts) AS last_interaction
+       FROM interactions i
+       JOIN members m ON m.zalo_user_id = i.zalo_user_id
+       WHERE m.is_active = 1
+         AND i.ts >= @since
+       GROUP BY i.zalo_user_id, m.display_name
+       ORDER BY interaction_count DESC, last_interaction DESC, LOWER(m.display_name) ASC
+       LIMIT @limit`,
+    )
+    .all({
+      since,
+      limit: Math.min(Math.max(limit, 1), 100),
+    }) as Omit<LeaderboardRow, "rank">[];
+
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
 export function listActiveMemberOptions(limit = 5000): MemberOption[] {
