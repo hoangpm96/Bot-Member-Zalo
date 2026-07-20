@@ -16,6 +16,21 @@ const DB_PATH =
 /** Lỗi nhận diện được khi DB của bot chưa tồn tại (cho API trả 503 thân thiện). */
 export class DbNotReadyError extends Error {}
 
+/**
+ * Trọng số điểm tương tác theo loại — reaction quá dễ thả trên Zalo nên bị hạ thấp
+ * so với message. vote (poll) đứng giữa. manual/image/video giữ tương đương gốc.
+ * PHẢI khớp INTERACTION_WEIGHT_SQL bên bot/src/db/index.ts (2 project riêng, không share code).
+ */
+const INTERACTION_WEIGHT_SQL = `CASE i.type
+    WHEN 'message' THEN 10
+    WHEN 'image'   THEN 10
+    WHEN 'video'   THEN 10
+    WHEN 'vote'    THEN 3
+    WHEN 'reaction' THEN 1
+    WHEN 'manual'  THEN 1
+    ELSE 1
+  END`;
+
 let db: Database.Database | null = null;
 
 function ensureWebSchema(database: Database.Database): void {
@@ -379,7 +394,7 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50): Leaderbo
     .prepare(
       `SELECT
          m.display_name,
-         COUNT(i.id) AS interaction_count,
+         SUM(${INTERACTION_WEIGHT_SQL}) AS interaction_count,
          SUM(CASE WHEN i.type = 'message' THEN 1 ELSE 0 END) AS message_count,
          SUM(CASE WHEN i.type = 'reaction' THEN 1 ELSE 0 END) AS reaction_count,
          SUM(CASE WHEN i.type = 'vote' THEN 1 ELSE 0 END) AS vote_count,
@@ -425,7 +440,7 @@ export function listMemberStats(limit = 2000): MemberStatRow[] {
   return getDb()
     .prepare(
       `SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
-              COUNT(i.id) AS interaction_count,
+              COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
               MAX(i.ts)   AS last_interaction,
               COALESCE(cw.warning_count, 0) AS warning_count,
               cw.last_warned_at AS last_warned_at
@@ -443,7 +458,7 @@ export function listMemberStats(limit = 2000): MemberStatRow[] {
 function memberStatsCte(): string {
   return `WITH member_stats AS (
     SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
-           COUNT(i.id) AS interaction_count,
+           COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
            MAX(i.ts) AS last_interaction,
            COALESCE(cw.warning_count, 0) AS warning_count,
            cw.last_warned_at AS last_warned_at
@@ -735,7 +750,7 @@ export function buildOverTargetCandidatePlan(input: {
   };
   const cte = `WITH member_stats AS (
     SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
-           COUNT(i.id) AS interaction_count,
+           COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
            MAX(i.ts) AS last_interaction,
            COALESCE(cw.warning_count, 0) AS warning_count,
            cw.last_warned_at AS last_warned_at

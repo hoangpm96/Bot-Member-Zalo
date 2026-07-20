@@ -389,14 +389,30 @@ export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
 // ---- Reads cho ranking / export ----
 
 /**
- * Thống kê tương tác mỗi member còn active: số lần + lần cuối.
+ * Trọng số điểm tương tác theo loại — reaction quá dễ thả trên Zalo nên bị hạ thấp
+ * so với message. vote (poll) đứng giữa. manual/image/video giữ tương đương gốc.
+ * Dùng chung ở mọi query tính interaction_count (bot + web) để khỏi lệch điểm.
+ */
+export const INTERACTION_WEIGHT_SQL = `CASE i.type
+    WHEN 'message' THEN 10
+    WHEN 'image'   THEN 10
+    WHEN 'video'   THEN 10
+    WHEN 'vote'    THEN 3
+    WHEN 'reaction' THEN 1
+    WHEN 'manual'  THEN 1
+    ELSE 1
+  END`;
+
+/**
+ * Thống kê tương tác mỗi member còn active: điểm có trọng số + lần cuối.
  * Dùng cho export-members (M1) và ranking (M2 — sắp theo count ASC, last_interaction ASC).
+ * Trọng số: message/image/video = 10, vote = 3, reaction/manual = 1.
  */
 export function getMemberStats(): MemberStats[] {
   return getDb()
     .prepare(
       `SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
-              COUNT(i.id)       AS interaction_count,
+              COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
               MAX(i.ts)         AS last_interaction
        FROM members m
        LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id

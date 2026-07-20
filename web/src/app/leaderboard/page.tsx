@@ -149,7 +149,7 @@ export default async function LeaderboardPage({
         </div>
 
         <footer className="mt-5 text-center text-xs leading-5 text-[var(--color-muted)]">
-          Mỗi tin nhắn, reaction, lượt bình chọn hoặc tương tác đã nhập được tính là một lượt.
+          Điểm tương tác có trọng số: 1 tin nhắn/ảnh/video = 10 điểm, 1 lượt bình chọn = 3 điểm, 1 reaction = 1 điểm.
           <br />
           “Toàn thời gian” được tính từ lúc hệ thống bắt đầu thu thập dữ liệu.
         </footer>
