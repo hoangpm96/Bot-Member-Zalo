@@ -536,6 +536,7 @@ export async function runListener(): Promise<void> {
   let lastEventSender = "";
   let socketState: "starting" | "connected" | "disconnected" | "closed" | "error" = "starting";
   let lastSocketError: string | null = null;
+  let socketRestartTimer: NodeJS.Timeout | null = null;
   const processStartedAt = Date.now();
   // Một queue nối tiếp giữ đúng thứ tự Zalo và tránh bắn đồng thời quá nhiều request Telegram.
   let telegramForwardQueue = Promise.resolve();
@@ -715,6 +716,10 @@ export async function runListener(): Promise<void> {
   });
 
   api.listener.on("connected", () => {
+    if (socketRestartTimer) {
+      clearTimeout(socketRestartTimer);
+      socketRestartTimer = null;
+    }
     socketState = "connected";
     lastSocketError = null;
     writeHealth("connected");
@@ -731,8 +736,22 @@ export async function runListener(): Promise<void> {
   api.listener.on("closed", (code: number, reason: string) => {
     socketState = "closed";
     lastSocketError = `code=${code}, reason=${reason || "-"}`;
+    recordBotError({
+      source: "listener",
+      code: "socket_closed",
+      message: lastSocketError,
+    });
     writeHealth("closed");
     console.warn(`[listener] WebSocket closed: code=${code}, reason=${reason || "-"}.`);
+    // zca-js chỉ phát "closed" sau khi không thể/không còn retry nội bộ. Process vẫn có
+    // các interval heartbeat/sync nên nếu giữ nguyên, PM2 thấy app online dù luồng realtime
+    // đã chết. Thoát có chủ đích để PM2 autorestart và tạo session WebSocket mới.
+    if (!socketRestartTimer) {
+      socketRestartTimer = setTimeout(() => {
+        console.error("[listener] WebSocket đã đóng hẳn — thoát để PM2 tự restart.");
+        process.exit(1);
+      }, 1_000);
+    }
   });
 
   api.listener.on("error", (err: unknown) => {

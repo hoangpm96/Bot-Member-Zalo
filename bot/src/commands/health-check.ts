@@ -1,17 +1,9 @@
 import { getBotState, recordBotError, setBotState, deleteBotState } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
+import { assessBotHealth, type BotHealthState } from "../health-state.js";
 
 const HEALTH_KEY = "bot_health";
 const ALERT_KEY = "bot_health_alert_active";
-const STALE_MS = 10 * 60 * 1000;
-
-interface BotHealthState {
-  heartbeatAt?: number;
-  socketState?: string;
-  pid?: number;
-  totalEvents?: number;
-  lastSocketError?: string | null;
-}
 
 function readHealth(): BotHealthState | null {
   const raw = getBotState(HEALTH_KEY);
@@ -26,14 +18,15 @@ function readHealth(): BotHealthState | null {
 export async function runHealthCheck(): Promise<void> {
   const now = Date.now();
   const health = readHealth();
-  const heartbeatAt = health?.heartbeatAt ?? 0;
-  const stale = heartbeatAt <= 0 || now - heartbeatAt > STALE_MS;
+  const assessment = assessBotHealth(health, now);
+  const { heartbeatAt, heartbeatStale, socketConnected, unhealthy } = assessment;
   const alertActive = getBotState(ALERT_KEY) === "1";
 
-  if (stale && !alertActive) {
+  if (unhealthy && !alertActive) {
     const ageMin = heartbeatAt > 0 ? Math.round((now - heartbeatAt) / 60000) : "unknown";
     const text =
-      `⚠️ Zalo bot heartbeat stale (${ageMin} phút).\n` +
+      `⚠️ Zalo bot realtime không healthy.\n` +
+      `Heartbeat stale: ${heartbeatStale ? `có (${ageMin} phút)` : "không"}\n` +
       `Socket: ${health?.socketState ?? "unknown"}\n` +
       `PID: ${health?.pid ?? "unknown"}\n` +
       `Lỗi socket: ${health?.lastSocketError ?? "-"}`;
@@ -50,11 +43,14 @@ export async function runHealthCheck(): Promise<void> {
       });
       throw e;
     }
-    console.warn(`[health-check] stale heartbeat, alert sent. age=${ageMin}m`);
+    console.warn(
+      `[health-check] unhealthy, alert sent. heartbeatStale=${heartbeatStale}, ` +
+        `socketConnected=${socketConnected}, age=${ageMin}m`,
+    );
     return;
   }
 
-  if (!stale && alertActive) {
+  if (!unhealthy && alertActive) {
     try {
       await sendTelegramText(
         `✅ Zalo bot heartbeat đã hồi phục.\nSocket: ${health?.socketState ?? "unknown"}\nEvents: ${health?.totalEvents ?? 0}`,
@@ -76,6 +72,7 @@ export async function runHealthCheck(): Promise<void> {
 
   console.log(
     `[health-check] heartbeat=${heartbeatAt ? new Date(heartbeatAt).toISOString() : "missing"}, ` +
-      `stale=${stale}, alertActive=${alertActive}.`,
+      `heartbeatStale=${heartbeatStale}, socketConnected=${socketConnected}, ` +
+      `alertActive=${alertActive}.`,
   );
 }
