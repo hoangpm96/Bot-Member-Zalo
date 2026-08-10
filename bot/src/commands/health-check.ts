@@ -1,6 +1,12 @@
 import { getBotState, recordBotError, setBotState, deleteBotState } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
-import { assessBotHealth, type BotHealthState } from "../health-state.js";
+import {
+  assessBotHealth,
+  parseLoginState,
+  isAwaitingQrLogin,
+  LOGIN_STATE_KEY,
+  type BotHealthState,
+} from "../health-state.js";
 
 const HEALTH_KEY = "bot_health";
 const ALERT_KEY = "bot_health_alert_active";
@@ -20,19 +26,30 @@ export async function runHealthCheck(): Promise<void> {
   const health = readHealth();
   const assessment = assessBotHealth(health, now);
   const { heartbeatAt, heartbeatStale, socketConnected, unhealthy } = assessment;
-  const alertActive = getBotState(ALERT_KEY) === "1";
+  const login = parseLoginState(getBotState(LOGIN_STATE_KEY));
+  const awaitingQr = isAwaitingQrLogin(login, now);
+  // Phân loại alert để khi tình trạng chuyển generic → cần-QR thì bắn lại tin mới
+  // (giá trị "1" cũ trước đây tương đương "generic").
+  const alertKind = awaitingQr ? "qr" : "generic";
+  const prevAlertRaw = getBotState(ALERT_KEY);
+  const prevAlert = prevAlertRaw === "1" ? "generic" : prevAlertRaw;
+  const alertActive = prevAlert === alertKind;
 
   if (unhealthy && !alertActive) {
     const ageMin = heartbeatAt > 0 ? Math.round((now - heartbeatAt) / 60000) : "unknown";
-    const text =
-      `⚠️ Zalo bot realtime không healthy.\n` +
-      `Heartbeat stale: ${heartbeatStale ? `có (${ageMin} phút)` : "không"}\n` +
-      `Socket: ${health?.socketState ?? "unknown"}\n` +
-      `PID: ${health?.pid ?? "unknown"}\n` +
-      `Lỗi socket: ${health?.lastSocketError ?? "-"}`;
+    const text = awaitingQr
+      ? `⚠️ Zalo bot CHƯA ĐĂNG NHẬP — session hỏng, cần quét QR lại.\n` +
+        `Trạng thái login: ${login?.state}\n` +
+        `PID: ${login?.pid ?? "unknown"}\n` +
+        `Mở web panel /login và quét bằng tài khoản co-admin.`
+      : `⚠️ Zalo bot realtime không healthy.\n` +
+        `Heartbeat stale: ${heartbeatStale ? `có (${ageMin} phút)` : "không"}\n` +
+        `Socket: ${health?.socketState ?? "unknown"}\n` +
+        `PID: ${health?.pid ?? "unknown"}\n` +
+        `Lỗi socket: ${health?.lastSocketError ?? "-"}`;
     try {
       await sendTelegramText(text);
-      setBotState(ALERT_KEY, "1", now);
+      setBotState(ALERT_KEY, alertKind, now);
     } catch (e) {
       recordBotError({
         source: "health-check",
@@ -44,13 +61,13 @@ export async function runHealthCheck(): Promise<void> {
       throw e;
     }
     console.warn(
-      `[health-check] unhealthy, alert sent. heartbeatStale=${heartbeatStale}, ` +
-        `socketConnected=${socketConnected}, age=${ageMin}m`,
+      `[health-check] unhealthy, alert sent (${alertKind}). heartbeatStale=${heartbeatStale}, ` +
+        `socketConnected=${socketConnected}, awaitingQr=${awaitingQr}, age=${ageMin}m`,
     );
     return;
   }
 
-  if (!unhealthy && alertActive) {
+  if (!unhealthy && prevAlert) {
     try {
       await sendTelegramText(
         `✅ Zalo bot heartbeat đã hồi phục.\nSocket: ${health?.socketState ?? "unknown"}\nEvents: ${health?.totalEvents ?? 0}`,

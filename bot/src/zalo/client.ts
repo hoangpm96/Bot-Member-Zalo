@@ -3,6 +3,8 @@ import path from "node:path";
 import { Zalo, LoginQRCallbackEventType, ThreadType } from "zca-js";
 import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
+import { setBotState } from "../db/index.js";
+import { LOGIN_STATE_KEY } from "../health-state.js";
 
 /**
  * Wrapper quanh zca-js. MỌI lời gọi Zalo đi qua đây — phần còn lại của code KHÔNG
@@ -78,6 +80,14 @@ function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): v
     );
   } catch {
     /* không chặn login nếu ghi status lỗi */
+  }
+  try {
+    // Mirror vào bot_state để health-check (process khác) biết bot đang chờ quét QR,
+    // thay vì chỉ thấy bot_health cũ của process trước (PID cũ, socket "connected" giả).
+    const now = Date.now();
+    setBotState(LOGIN_STATE_KEY, JSON.stringify({ state, updatedAt: now, pid: process.pid }), now);
+  } catch {
+    /* không chặn login nếu ghi DB lỗi */
   }
 }
 
