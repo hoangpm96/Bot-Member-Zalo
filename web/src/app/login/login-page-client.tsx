@@ -41,29 +41,39 @@ export function LoginPageClient({ initialStatus }: { initialStatus: QrStatus }) 
   const [checking, setChecking] = useState(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
-  async function checkStatus() {
-    setChecking(true);
+  async function checkStatus(opts?: { silent?: boolean }) {
+    if (!opts?.silent) setChecking(true);
     try {
       const res = await fetch("/api/qr", { cache: "no-store" });
       if (!res.ok) throw new Error("Không đọc được trạng thái đăng nhập");
       const json = (await res.json()) as QrStatus;
       setStatus(json);
-      // Đổi query timestamp để tải lại ảnh nếu Zalo vừa tạo QR mới.
-      setImgTs(Date.now());
+      // Bot xoay QR mỗi ~100s; updatedAt đổi → query timestamp đổi → ảnh tải lại.
+      setImgTs(json.updatedAt ?? Date.now());
       if (json.state === "waiting_scan" || json.state === "scanned") {
         setReloginPending(false);
       }
     } catch (e) {
-      setStatus(null);
-      setActionMessage(e instanceof Error ? e.message : "Không đọc được trạng thái đăng nhập");
+      if (!opts?.silent) {
+        setStatus(null);
+        setActionMessage(e instanceof Error ? e.message : "Không đọc được trạng thái đăng nhập");
+      }
     } finally {
-      setChecking(false);
+      if (!opts?.silent) setChecking(false);
     }
   }
 
   useEffect(() => {
     void checkStatus();
   }, []);
+
+  // Tự poll để ảnh QR và trạng thái luôn mới — tránh quét phải mã đã hết hạn.
+  const loggedInNow = status?.state === "logged_in";
+  useEffect(() => {
+    if (loggedInNow) return;
+    const id = setInterval(() => void checkStatus({ silent: true }), 5000);
+    return () => clearInterval(id);
+  }, [loggedInNow]);
 
   const state = status?.state ?? "unknown";
   const meta = STATE_META[state];
