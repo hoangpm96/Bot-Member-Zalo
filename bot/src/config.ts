@@ -136,6 +136,13 @@ export const config = {
    * giãn theo nội dung; tăng số này = ngày sôi động được tóm tắt chi tiết hơn.
    */
   summaryMaxParts: Math.min(9, Math.max(1, readInt("SUMMARY_MAX_PARTS", 3))),
+
+  /**
+   * Giãn cách giữa các GROUP ZALO khi gửi tóm tắt (phút, kèm jitter ngẫu nhiên
+   * +0-25%) — cùng một bản tin đập vào nhiều group cùng giây trông rất "bot".
+   * 0 = gửi liền nhau. Không áp dụng cho Telegram.
+   */
+  summaryGroupGapMinutes: Math.max(0, readInt("SUMMARY_GROUP_GAP_MINUTES", 10)),
 } as const;
 
 export type AppConfig = typeof config;

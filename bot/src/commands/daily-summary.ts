@@ -20,7 +20,9 @@ import {
 
 const STATE_KEY_LAST = "daily_summary_last";
 const LOCK_KEY = "daily_summary_lock";
-const LOCK_STALE_MS = 30 * 60 * 1000;
+// Stale rộng vì các group Zalo được giãn cách SUMMARY_GROUP_GAP_MINUTES —
+// một lần chạy nhiều group có thể kéo dài quá 30 phút.
+const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
 /** Heartbeat listener cũ hơn ngưỡng này → dữ liệu ngày hôm qua coi như đáng ngờ. */
 const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 
@@ -101,13 +103,28 @@ function isAllSent(state: SummarySendState, dests: SummaryDestination[]): boolea
   return dests.every((d) => (state.sent[d.key] ?? 0) >= state.parts.length);
 }
 
-/** Gửi phần còn thiếu cho từng đích, cập nhật tiến độ sau MỖI tin để resume được. */
+/**
+ * Gửi phần còn thiếu cho từng đích, cập nhật tiến độ sau MỖI tin để resume được.
+ * Giữa các GROUP ZALO nghỉ SUMMARY_GROUP_GAP_MINUTES (+jitter 0-25%) — cùng một
+ * bản tin xuất hiện ở nhiều group cùng giây trông rất "bot". Telegram không cần.
+ */
 async function sendParts(state: SummarySendState, dests: SummaryDestination[]): Promise<void> {
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   let api: any = null;
   let sentInRun = 0;
+  let sentToZaloBefore = false;
   for (const dest of dests) {
     const already = state.sent[dest.key] ?? 0;
+    if (already >= state.parts.length) continue;
+    if (dest.kind === "zalo" && sentToZaloBefore && config.summaryGroupGapMinutes > 0) {
+      const gapMs = Math.round(
+        config.summaryGroupGapMinutes * 60_000 * (1 + Math.random() * 0.25),
+      );
+      console.log(
+        `[daily-summary] Nghỉ ${Math.round(gapMs / 1000)}s trước khi gửi ${dest.key} (giãn cách chống lộ bot)...`,
+      );
+      await sleep(gapMs);
+    }
     for (let i = already; i < state.parts.length; i += 1) {
       if (sentInRun > 0) await sleep(config.zaloThrottleMs);
       const part = state.parts[i] ?? "";
@@ -134,11 +151,12 @@ async function sendParts(state: SummarySendState, dests: SummaryDestination[]): 
         `[daily-summary] Đã gửi tin ${i + 1}/${state.parts.length} → ${dest.key} (${part.length} ký tự).`,
       );
     }
+    if (dest.kind === "zalo") sentToZaloBefore = true;
   }
 }
 
 /**
- * Cron 7:30 sáng: tóm tắt tin nhắn NGÀY HÔM TRƯỚC của GROUP_ID bằng DeepSeek
+ * Cron 8:10 sáng: tóm tắt tin nhắn NGÀY HÔM TRƯỚC của GROUP_ID bằng DeepSeek
  * rồi gửi đến các đích: group Zalo trong SUMMARY_GROUP_ID (có thể gồm cả nhóm
  * chính) và/hoặc Telegram SUMMARY_TELEGRAM_CHAT_ID. Ngày nhiều nội dung →
  * bản tin tự chia tối đa SUMMARY_MAX_PARTS tin đánh số (1/N).
