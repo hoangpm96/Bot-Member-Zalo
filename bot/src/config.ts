@@ -128,8 +128,11 @@ export const config = {
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
 
-  /** Model DeepSeek dùng để tóm tắt. deepseek-chat (V3) rẻ và đủ tốt cho tóm tắt. */
-  deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-chat",
+  /**
+   * Model DeepSeek dùng để tóm tắt. deepseek-v4-flash: bản nhanh/rẻ dòng V4,
+   * test hiểu ngữ cảnh hội thoại tốt; cần sâu hơn nữa thì deepseek-v4-pro.
+   */
+  deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash",
 
   /**
    * Số tin nhắn Zalo tối đa cho một bản tóm tắt (1-9). Số tin thực tế tự co
