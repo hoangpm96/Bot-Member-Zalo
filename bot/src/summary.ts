@@ -203,6 +203,17 @@ export async function summarizeWithDeepSeek(input: {
     "là gì theo log (vd: '- Để tránh flop khi dùng AI viết content, X khuyên: sửa lại văn phong máy móc, " +
     "thêm trải nghiệm cá nhân, ...'). Người đọc phải học được điều nhóm đã bàn, không phải chỉ biết nhóm có bàn. " +
     "Chi tiết nào log không nói rõ thì bỏ qua, không suy diễn. " +
+    "HIỂU NGỮ CẢNH HỘI THOẠI (rất quan trọng, sai nghĩa tệ hơn thiếu ý): log là chat nhóm rời rạc — " +
+    "nhiều tin là câu trả lời hoặc câu đùa nối tiếp các tin PHÍA TRƯỚC, đại từ kiểu 'nó', 'cái đó', " +
+    "'vụ đó' chỉ về thứ đã nhắc trước. Với mỗi cụm hội thoại: đọc hết cả cụm để hiểu đúng AI/CHỦ THỂ NÀO " +
+    "làm gì, quan hệ nhân–quả ra sao, rồi mới viết lại thành câu đầy đủ tự đứng được một mình. " +
+    "Đặc biệt cẩn thận các câu so sánh trước/sau và than thở: xác định rõ điều gì là NGUYÊN NHÂN, " +
+    "điều gì là KẾT QUẢ theo đúng lời người nói, không đảo ngược tình huống " +
+    "(vd 'AI làm nhanh quá nên rảnh' khác hẳn 'bị giao thêm việc vì AI'). " +
+    "Câu đùa/mỉa mai phải ghi rõ là đùa (vd 'X đùa rằng...') hoặc bỏ hẳn — không diễn giải thành " +
+    "lời khuyên hay sự kiện nghiêm túc. Mỗi gạch đầu dòng CHỈ MỘT Ý — không ghép hai ý không liên quan " +
+    "vào cùng dòng bằng dấu chấm phẩy. Đoạn nào chính bạn không chắc hiểu đúng thì bỏ qua — " +
+    "thà thiếu còn hơn tóm sai nghĩa. " +
     "Bố cục bản tóm tắt: " +
     "(1) từng chủ đề/thảo luận trong ngày — mỗi chủ đề một cụm gạch đầu dòng, nêu ai khởi xướng và " +
     "các ý kiến/kết luận chính CÓ NỘI DUNG CỤ THỂ; " +
