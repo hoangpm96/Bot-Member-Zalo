@@ -54,6 +54,9 @@ CRON_TZ=Asia/Ho_Chi_Minh
 
 # Monthly cleanup plan. Sends Telegram approval; actual remove happens after approval via telegram-poll.
 0 9 3 * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" monthly-cleanup >> "$LOG_DIR/monthly-cleanup.log" 2>&1
+
+# Daily summary. Summarizes yesterday's group messages via DeepSeek, posts to SUMMARY_GROUP_ID.
+30 7 * * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" daily-summary >> "$LOG_DIR/daily-summary.log" 2>&1
 $MARKER_END
 EOF
 

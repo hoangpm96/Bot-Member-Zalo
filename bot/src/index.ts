@@ -9,6 +9,7 @@ import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
 import { runTelegramFindTopic, runTelegramForwardTest } from "./commands/telegram-forward.js";
+import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { recordBotError } from "./db/index.js";
 
 /**
@@ -41,6 +42,7 @@ Cách dùng:
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
+  npm run daily-summary     # cron 7:30 sáng: tóm tắt tin nhắn hôm qua (DeepSeek) → gửi group phụ
 `;
 
 async function main(): Promise<void> {
@@ -88,6 +90,9 @@ async function main(): Promise<void> {
       break;
     case "telegram-poll":
       await runTelegramPoll();
+      break;
+    case "daily-summary":
+      await runDailySummarySafe();
       break;
     default:
       console.log(USAGE);

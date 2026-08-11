@@ -386,6 +386,53 @@ export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
     });
 }
 
+// ---- Reads cho tóm tắt hằng ngày ----
+
+export interface GroupMessageRow {
+  zalo_user_id: string;
+  display_name: string;
+  text: string;
+  ts: number;
+}
+
+/**
+ * Tin nhắn text của 1 thread trong [startTs, endTs), sắp theo thời gian tăng dần.
+ * Loại tin bot tự gửi (is_self=1) — cảnh báo cleanup/bản tin của bot không phải
+ * thảo luận của thành viên, không được lọt vào tóm tắt hay top "sôi nổi nhất".
+ */
+export function listGroupMessagesBetween(
+  threadId: string,
+  startTs: number,
+  endTs: number,
+): GroupMessageRow[] {
+  return getDb()
+    .prepare(
+      `SELECT zalo_user_id, display_name, text, ts
+       FROM group_messages
+       WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs AND is_self = 0
+       ORDER BY ts ASC`,
+    )
+    .all({ threadId, startTs, endTs }) as GroupMessageRow[];
+}
+
+/** Đếm ảnh/video thành viên gửi trong [startTs, endTs) — cho phần thống kê của tóm tắt. */
+export function countGroupMediaBetween(
+  threadId: string,
+  startTs: number,
+  endTs: number,
+): { images: number; videos: number } {
+  const row = getDb()
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN media_type = 'image' THEN media_count ELSE 0 END), 0) AS images,
+         COALESCE(SUM(CASE WHEN media_type = 'video' THEN media_count ELSE 0 END), 0) AS videos
+       FROM group_media_events
+       WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs AND is_self = 0`,
+    )
+    .get({ threadId, startTs, endTs }) as { images: number; videos: number };
+  return { images: Number(row.images), videos: Number(row.videos) };
+}
+
 // ---- Reads cho ranking / export ----
 
 /**

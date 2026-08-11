@@ -59,4 +59,13 @@ if [ -n "$self_listen" ] && [ "$self_listen" != "1" ] && [ "$self_listen" != "tr
   echo "Warning: ZALO_SELF_LISTEN=$self_listen. Self messages will not be archived/counted."
 fi
 
+# Daily summary: both empty = feature off (OK); exactly one set = broken config.
+summary_group_id="$(read_env SUMMARY_GROUP_ID)"
+deepseek_api_key="$(read_env DEEPSEEK_API_KEY)"
+if { [ -n "$summary_group_id" ] && [ -z "$deepseek_api_key" ]; } || \
+   { [ -z "$summary_group_id" ] && [ -n "$deepseek_api_key" ]; }; then
+  echo "Error: SUMMARY_GROUP_ID and DEEPSEEK_API_KEY must be set together (or both empty to disable daily summary)."
+  exit 1
+fi
+
 echo "Env validation OK."

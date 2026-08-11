@@ -102,6 +102,21 @@ export const config = {
 
   /** Timeout chờ duyệt cleanup qua Telegram (brainstorm: 48h). */
   approvalTimeoutHours: readInt("APPROVAL_TIMEOUT_HOURS", 48),
+
+  /** ID group phụ nhận bản tóm tắt hằng ngày (lấy bằng `npm run list-groups`). Rỗng = tắt. */
+  summaryGroupId: process.env.SUMMARY_GROUP_ID?.trim() || "",
+
+  /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
+
+  /** Model DeepSeek dùng để tóm tắt. deepseek-chat (V3) rẻ và đủ tốt cho tóm tắt. */
+  deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-chat",
+
+  /**
+   * Số tin nhắn Zalo tối đa cho một bản tóm tắt (1-9). Số tin thực tế tự co
+   * giãn theo nội dung; tăng số này = ngày sôi động được tóm tắt chi tiết hơn.
+   */
+  summaryMaxParts: Math.min(9, Math.max(1, readInt("SUMMARY_MAX_PARTS", 3))),
 } as const;
 
 export type AppConfig = typeof config;
