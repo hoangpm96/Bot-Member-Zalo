@@ -103,8 +103,27 @@ export const config = {
   /** Timeout chờ duyệt cleanup qua Telegram (brainstorm: 48h). */
   approvalTimeoutHours: readInt("APPROVAL_TIMEOUT_HOURS", 48),
 
-  /** ID group phụ nhận bản tóm tắt hằng ngày (lấy bằng `npm run list-groups`). Rỗng = tắt. */
-  summaryGroupId: process.env.SUMMARY_GROUP_ID?.trim() || "",
+  /**
+   * Các group Zalo nhận bản tóm tắt hằng ngày, phân tách dấu phẩy (lấy ID bằng
+   * `npm run list-groups`). Có thể gồm cả GROUP_ID (nhóm chính). Rỗng = không gửi Zalo.
+   */
+  summaryGroupIds: [
+    ...new Set(
+      (process.env.SUMMARY_GROUP_ID ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s !== ""),
+    ),
+  ],
+
+  /** Chat/channel Telegram nhận bản tóm tắt (vd @tenchannel hoặc -100...). Rỗng = không gửi Telegram. */
+  summaryTelegramChatId: process.env.SUMMARY_TELEGRAM_CHAT_ID?.trim() || "",
+
+  /** message_thread_id nếu đích Telegram là forum topic. Trống nếu là channel/chat thường. */
+  summaryTelegramTopicId: readOptionalPositiveInt("SUMMARY_TELEGRAM_TOPIC_ID"),
+
+  /** Bot token riêng cho đích tóm tắt Telegram. Rỗng = dùng chung TELEGRAM_BOT_TOKEN. */
+  summaryTelegramBotToken: process.env.SUMMARY_TELEGRAM_BOT_TOKEN?.trim() || "",
 
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",

@@ -59,13 +59,20 @@ if [ -n "$self_listen" ] && [ "$self_listen" != "1" ] && [ "$self_listen" != "tr
   echo "Warning: ZALO_SELF_LISTEN=$self_listen. Self messages will not be archived/counted."
 fi
 
-# Daily summary: both empty = feature off (OK); exactly one set = broken config.
+# Daily summary: all empty = feature off (OK); key without destination (or vice
+# versa) = broken config. Destination = SUMMARY_GROUP_ID and/or SUMMARY_TELEGRAM_CHAT_ID.
 summary_group_id="$(read_env SUMMARY_GROUP_ID)"
+summary_telegram_chat_id="$(read_env SUMMARY_TELEGRAM_CHAT_ID)"
 deepseek_api_key="$(read_env DEEPSEEK_API_KEY)"
-if { [ -n "$summary_group_id" ] && [ -z "$deepseek_api_key" ]; } || \
-   { [ -z "$summary_group_id" ] && [ -n "$deepseek_api_key" ]; }; then
-  echo "Error: SUMMARY_GROUP_ID and DEEPSEEK_API_KEY must be set together (or both empty to disable daily summary)."
-  exit 1
+if [ -n "$summary_group_id" ] || [ -n "$summary_telegram_chat_id" ] || [ -n "$deepseek_api_key" ]; then
+  if [ -z "$deepseek_api_key" ]; then
+    echo "Error: daily summary has a destination but DEEPSEEK_API_KEY is empty."
+    exit 1
+  fi
+  if [ -z "$summary_group_id" ] && [ -z "$summary_telegram_chat_id" ]; then
+    echo "Error: DEEPSEEK_API_KEY is set but no summary destination (SUMMARY_GROUP_ID / SUMMARY_TELEGRAM_CHAT_ID)."
+    exit 1
+  fi
 fi
 
 echo "Env validation OK."
