@@ -42,7 +42,7 @@ Cách dùng:
   npm run cleanup-warn      # ngày 25: cảnh báo group (DRY_RUN=1 chỉ in)
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
-  npm run daily-summary     # cron 8:10 sáng: tóm tắt tin nhắn hôm qua (DeepSeek) → gửi các group/Telegram
+  npm run daily-summary     # cron 9:10 sáng: tóm tắt tin nhắn hôm qua (DeepSeek) → gửi các group/Telegram
 `;
 
 async function main(): Promise<void> {

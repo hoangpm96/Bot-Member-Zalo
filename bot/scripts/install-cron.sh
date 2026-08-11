@@ -57,7 +57,7 @@ CRON_TZ=Asia/Ho_Chi_Minh
 
 # Daily summary. Summarizes yesterday's group messages via DeepSeek, posts to SUMMARY_GROUP_ID
 # and SUMMARY_TELEGRAM_CHAT_ID. Zalo groups are spaced SUMMARY_GROUP_GAP_MINUTES apart.
-10 8 * * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" daily-summary >> "$LOG_DIR/daily-summary.log" 2>&1
+10 9 * * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" daily-summary >> "$LOG_DIR/daily-summary.log" 2>&1
 $MARKER_END
 EOF
 

@@ -156,7 +156,7 @@ async function sendParts(state: SummarySendState, dests: SummaryDestination[]): 
 }
 
 /**
- * Cron 8:10 sáng: tóm tắt tin nhắn NGÀY HÔM TRƯỚC của GROUP_ID bằng DeepSeek
+ * Cron 9:10 sáng: tóm tắt tin nhắn NGÀY HÔM TRƯỚC của GROUP_ID bằng DeepSeek
  * rồi gửi đến các đích: group Zalo trong SUMMARY_GROUP_ID (có thể gồm cả nhóm
  * chính) và/hoặc Telegram SUMMARY_TELEGRAM_CHAT_ID. Ngày nhiều nội dung →
  * bản tin tự chia tối đa SUMMARY_MAX_PARTS tin đánh số (1/N).
