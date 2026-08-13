@@ -24,6 +24,7 @@
     "telegram-forward-test": "tsx src/index.ts telegram-forward-test",
     "cleanup-warn": "tsx src/index.ts cleanup-warn",
     "monthly-cleanup": "tsx src/index.ts monthly-cleanup",
+    "daily-fb-post": "tsx src/index.ts daily-fb-post",
     "telegram-poll": "tsx src/index.ts telegram-poll",
     "daily-summary": "tsx src/index.ts daily-summary",
     "backfill-summaries": "tsx src/index.ts backfill-summaries",
@@ -37,6 +38,7 @@
     "better-sqlite3": "^11.8.1",
     "dotenv": "^16.4.7",
     "qrcode-terminal": "^0.12.0",
+    "sharp": "^0.35.3",
     "zca-js": "^2.0.0"
   },
   "devDependencies": {

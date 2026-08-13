@@ -134,6 +134,18 @@ export const config = {
    */
   deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash",
 
+  /** Facebook Page nhận bản tin hằng ngày (Pages API). Rỗng cả 2 = tắt daily-fb-post. */
+  fbPageId: process.env.FB_PAGE_ID?.trim() || "",
+  /** Page access token KHÔNG hết hạn (lấy từ /me/accounts với user token dài hạn). */
+  fbPageToken: process.env.FB_PAGE_TOKEN?.trim() || "",
+
+  /** API key Beeknoee (sk-bee-...) — tầng sinh ảnh dự phòng. Rỗng = bỏ tầng này. */
+  beeknoeeApiKey: process.env.BEEKNOEE_API_KEY?.trim() || "",
+  /** Endpoint sinh ảnh OpenAI-compatible ưu tiên (cùng cơ chế ai4ba). Rỗng = bỏ tầng này. */
+  fbImageBaseUrl: process.env.FB_IMAGE_BASE_URL?.trim() || "",
+  fbImageApiKey: process.env.FB_IMAGE_API_KEY?.trim() || "",
+  fbImageModel: process.env.FB_IMAGE_MODEL?.trim() || "",
+
   /**
    * Số tin nhắn Zalo tối đa cho một bản tóm tắt (1-9). Số tin thực tế tự co
    * giãn theo nội dung; tăng số này = ngày sôi động được tóm tắt chi tiết hơn.
