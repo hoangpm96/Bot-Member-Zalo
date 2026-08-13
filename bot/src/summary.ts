@@ -228,12 +228,26 @@ export async function summarizeWithDeepSeek(input: {
     "lời khuyên hay sự kiện nghiêm túc. Mỗi gạch đầu dòng CHỈ MỘT Ý — không ghép hai ý không liên quan " +
     "vào cùng dòng bằng dấu chấm phẩy. Đoạn nào chính bạn không chắc hiểu đúng thì bỏ qua — " +
     "thà thiếu còn hơn tóm sai nghĩa. " +
-    "Bố cục bản tóm tắt: " +
-    "(1) từng chủ đề/thảo luận trong ngày — mỗi chủ đề một cụm gạch đầu dòng, nêu ai khởi xướng và " +
-    "các ý kiến/kết luận chính CÓ NỘI DUNG CỤ THỂ; " +
-    "(2) thông báo/quyết định của nhóm nếu có (kèm chi tiết: thời gian, chi phí, ai phụ trách...); " +
-    "(3) link được chia sẻ kèm mô tả link nói về gì; " +
-    "(4) câu hỏi chưa được trả lời nếu có. " +
+    "BỐI CẢNH NHÓM: đây là nhóm cộng đồng IT Business Analyst — nội dung mang chất nhóm nhất là " +
+    "chuyên môn BA/Product Owner và chuyện áp dụng AI vào công việc; ngoài ra có tư vấn học " +
+    "hành/nghề nghiệp và tán gẫu đời thường. " +
+    "Bố cục bản tóm tắt: PHÂN NHÓM nội dung thành các MỤC theo đúng thứ tự ưu tiên sau — " +
+    "quan trọng/chất nhóm nằm trên, ít quan trọng nằm dưới; mục nào không có nội dung thì BỎ HẲN, " +
+    "không ghi tiêu đề rỗng: " +
+    "(1) '📢 THÔNG BÁO & QUYẾT ĐỊNH' — thông báo/quyết định của nhóm, kèm chi tiết thời gian, " +
+    "chi phí, ai phụ trách; " +
+    "(2) '💼 CHUYÊN MÔN BA/PO' — nghiệp vụ, kinh nghiệm làm việc, quy trình, tool, tài liệu " +
+    "của nghề BA/Product Owner; " +
+    "(3) '🤖 AI TRONG CÔNG VIỆC' — áp dụng AI vào công việc, kinh nghiệm dùng model/công cụ AI; " +
+    "(4) '🎓 HỌC HÀNH & NGHỀ NGHIỆP' — tư vấn học, chứng chỉ, chuyển ngành, thị trường việc làm; " +
+    "(5) '🔗 LINK ĐÃ CHIA SẺ' — mỗi link một dòng kèm mô tả link nói về gì; " +
+    "(6) '❓ CÂU HỎI CHƯA CÓ TRẢ LỜI' — câu hỏi trong nhóm chưa ai trả lời; " +
+    "(7) '☕ NGOÀI LỀ' — chém gió, chuyện vui, đời thường: LUÔN nằm cuối, mỗi chuyện chỉ điểm " +
+    "nhanh 1-2 dòng, chuyện nhạt bỏ hẳn. " +
+    "Trong mỗi mục: mỗi chủ đề một cụm gạch đầu dòng, nêu ai khởi xướng và các ý kiến/kết luận " +
+    "chính CÓ NỘI DUNG CỤ THỂ. Thảo luận khớp nhiều mục thì xếp vào mục cao nhất phù hợp, " +
+    "không nhắc lại ở mục khác. Khi phải cắt bớt cho vừa độ dài: hy sinh mục dưới trước để " +
+    "giữ độ sâu cho mục trên. " +
     "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown đậm/nghiêng vì Zalo không render. " +
     `Toàn bộ dưới ${summaryTargetChars(config.summaryMaxParts)} ký tự — ngày nhiều nội dung hãy TẬN DỤNG ` +
     "giới hạn này để viết chi tiết; ngày ít hoạt động thì viết ngắn thôi. " +
