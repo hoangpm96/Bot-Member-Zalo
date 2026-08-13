@@ -1056,6 +1056,39 @@ export function listDailySummaries(filters: DailySummaryFilters = {}): DailySumm
     .all(where.params) as DailySummaryRow[];
 }
 
+/** Row nhẹ cho danh sách/điều hướng ngày — không kéo summary_text đầy đủ. */
+export interface DailySummaryDayRow {
+  day_date: string;
+  day_label: string;
+  total_messages: number | null;
+  unique_senders: number | null;
+  images: number | null;
+  videos: number | null;
+  source: string;
+  created_at: number;
+  summary_chars: number;
+}
+
+export function listDailySummaryDays(limit = 1000): DailySummaryDayRow[] {
+  if (!tableExists("daily_summaries")) return [];
+  return getDb()
+    .prepare(
+      `SELECT day_date, day_label, total_messages, unique_senders, images, videos,
+              source, created_at, length(summary_text) AS summary_chars
+       FROM daily_summaries
+       ORDER BY day_date DESC
+       LIMIT @limit`,
+    )
+    .all({ limit: Math.min(Math.max(limit, 1), 5000) }) as DailySummaryDayRow[];
+}
+
+export function getDailySummaryByDate(dayDate: string): DailySummaryRow | undefined {
+  if (!tableExists("daily_summaries")) return undefined;
+  return getDb()
+    .prepare(`SELECT * FROM daily_summaries WHERE day_date = @dayDate`)
+    .get({ dayDate }) as DailySummaryRow | undefined;
+}
+
 export function countDailySummaries(filters: DailySummaryFilters = {}): number {
   if (!tableExists("daily_summaries")) return 0;
   const where = dailySummaryWhere(filters);

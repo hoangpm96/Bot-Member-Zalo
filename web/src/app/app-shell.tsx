@@ -72,7 +72,9 @@ export function AppShell({
           </nav>
         </aside>
 
-        <main className="flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">{children}</main>
+        {/* min-w-0: cho phép main co dưới bề rộng content — thiếu nó thì bảng/dòng dài
+            đẩy cả trang rộng hơn viewport, mobile bị tràn ngang mọi trang. */}
+        <main className="min-w-0 flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">{children}</main>
       </div>
 
       <nav className="fixed bottom-0 inset-x-0 z-50 flex overflow-x-auto md:hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">

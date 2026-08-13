@@ -1,69 +1,45 @@
 import Link from "next/link";
-import { Download, NotebookText, RotateCcw, Search } from "lucide-react";
-import { PageHeader, EmptyState, Card, CardTitle, Button, Input, Stat, Badge } from "@/components/ui";
+import { ChevronLeft, ChevronRight, Download, NotebookText, Search, X } from "lucide-react";
+import { PageHeader, EmptyState, Card, CardTitle, Button, Input, Badge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import {
   dbExists,
-  countDailySummaries,
+  getDailySummaryByDate,
   listDailySummaries,
-  type DailySummaryFilters,
+  listDailySummaryDays,
+  type DailySummaryDayRow,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-const LIMIT_OPTIONS = [
-  { value: "30", label: "30 ngày" },
-  { value: "90", label: "90 ngày" },
-  { value: "365", label: "365 ngày" },
-  { value: "1000", label: "1000 ngày" },
-];
-
 function one(params: SearchParams | undefined, key: string): string {
   const value = params?.[key];
   return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
 }
 
-function parseDateMs(value: string, endOfDay = false): number | null {
-  if (!value) return null;
-  const d = new Date(`${value}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+07:00`);
-  const t = d.getTime();
-  return Number.isFinite(t) ? t : null;
+/** Trích đoạn quanh vị trí khớp từ khoá — cho danh sách kết quả tìm kiếm. */
+function snippetAround(text: string, q: string, radius = 90): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  const idx = flat.toLowerCase().indexOf(q.toLowerCase());
+  if (idx < 0) return flat.slice(0, radius * 2) + (flat.length > radius * 2 ? "…" : "");
+  const start = Math.max(0, idx - radius);
+  const end = Math.min(flat.length, idx + q.length + radius);
+  return (start > 0 ? "…" : "") + flat.slice(start, end) + (end < flat.length ? "…" : "");
 }
 
-function parseFilters(params: SearchParams | undefined): DailySummaryFilters & { fromRaw: string; toRaw: string } {
-  const rawLimit = Number(one(params, "limit") || 30);
-  const limit = [30, 90, 365, 1000].includes(rawLimit) ? rawLimit : 30;
-  const fromRaw = one(params, "from");
-  const toRaw = one(params, "to");
-  return {
-    q: one(params, "q"),
-    from: parseDateMs(fromRaw),
-    to: parseDateMs(toRaw, true),
-    limit,
-    fromRaw,
-    toRaw,
-  };
+function dayHref(dayDate: string, q?: string): string {
+  const qs = new URLSearchParams({ day: dayDate });
+  if (q) qs.set("q", q);
+  return `/summaries?${qs.toString()}`;
 }
 
-function exportHref(params: SearchParams | undefined, format: "md" | "json"): string {
-  const qs = new URLSearchParams();
-  for (const key of ["q", "from", "to", "limit"]) {
-    const v = one(params, key);
-    if (v) qs.set(key, v);
-  }
-  qs.set("format", format);
-  return `/api/summaries/export?${qs.toString()}`;
-}
-
-function parseJsonArray(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.map(String) : [];
-  } catch {
-    return [];
-  }
+function dayStats(day: DailySummaryDayRow): string {
+  const parts: string[] = [];
+  if (day.total_messages !== null) parts.push(`${day.total_messages} tin`);
+  if (day.unique_senders) parts.push(`${day.unique_senders} người`);
+  return parts.join(" · ");
 }
 
 export default async function SummariesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
@@ -77,135 +53,231 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
   }
 
   const params = await searchParams;
-  const filters = parseFilters(params);
-  const summaries = listDailySummaries(filters);
-  const total = countDailySummaries(filters);
-  const totalMessages = summaries.reduce((sum, s) => sum + (s.total_messages ?? 0), 0);
-  const latest = summaries[0];
+  const q = one(params, "q").trim();
+  const dayParam = one(params, "day");
+
+  const days = listDailySummaryDays();
+  if (days.length === 0) {
+    return (
+      <div>
+        <PageHeader title="Tóm tắt ngày" />
+        <EmptyState>
+          Chưa có bản tóm tắt nào trong kho. Bản tin sẽ được lưu tự động mỗi sáng khi cron daily-summary chạy;
+          quá khứ bù bằng lệnh backfill-summaries trên server.
+        </EmptyState>
+      </div>
+    );
+  }
+
+  const selectedDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((d) => d.day_date === dayParam)
+      ? dayParam
+      : days[0].day_date;
+  const selected = getDailySummaryByDate(selectedDate);
+  const selectedIdx = days.findIndex((d) => d.day_date === selectedDate);
+  // days sắp mới → cũ: "hôm trước" nằm SAU trong mảng, "hôm sau" nằm TRƯỚC.
+  const olderDay = selectedIdx >= 0 ? days[selectedIdx + 1] : undefined;
+  const newerDay = selectedIdx > 0 ? days[selectedIdx - 1] : undefined;
+
+  const searchResults = q ? listDailySummaries({ q, limit: 60 }) : [];
+  const topSenders = selected ? parseJsonArray(selected.top_senders_json) : [];
+  const totalMessages = days.reduce((sum, d) => sum + (d.total_messages ?? 0), 0);
 
   return (
     <div>
       <PageHeader
         title="Tóm tắt ngày"
-        desc="Kho lưu vĩnh viễn bản tóm tắt hằng ngày của bot — nguyên liệu tổng hợp, phân tích, viết blog."
+        desc={`Kho lưu ${days.length} ngày (${days[days.length - 1].day_label} → ${days[0].day_label}) · ${totalMessages} tin nhắn đã tóm tắt.`}
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Stat label="Bản tóm tắt khớp bộ lọc" value={total} sub={`hiển thị ${summaries.length} ngày mới nhất`} />
-        <Stat label="Tin nhắn đã tóm tắt" value={totalMessages} sub="tổng của các ngày đang hiển thị" />
-        <Stat label="Ngày mới nhất" value={latest ? latest.day_label : "—"} sub={latest ? `lưu lúc ${fmtDateTime(latest.created_at)}` : "chưa có bản nào"} />
-        <Stat
-          label="Ký tự tóm tắt"
-          value={summaries.reduce((sum, s) => sum + s.summary_text.length, 0)}
-          sub="tổng của các ngày đang hiển thị"
-        />
-      </div>
+      {/* Thanh điều hướng ngày + tìm kiếm: dạng cột trên mobile, 1 hàng trên desktop. */}
+      <Card className="p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <form action="/summaries" className="flex min-w-0 flex-1 items-center gap-2">
+            {q ? <input type="hidden" name="q" value={q} /> : null}
+            <Link
+              href={olderDay ? dayHref(olderDay.day_date, q) : "#"}
+              aria-disabled={!olderDay}
+              aria-label="Ngày trước đó"
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--color-border)] ${
+                olderDay
+                  ? "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                  : "pointer-events-none text-[var(--color-muted)] opacity-40"
+              }`}
+            >
+              <ChevronLeft size={16} />
+            </Link>
+            <select
+              name="day"
+              defaultValue={selectedDate}
+              aria-label="Chọn ngày"
+              className="h-9 min-w-0 flex-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+            >
+              {days.map((d) => (
+                <option key={d.day_date} value={d.day_date}>
+                  {d.day_label}
+                  {dayStats(d) ? ` — ${dayStats(d)}` : ""}
+                </option>
+              ))}
+            </select>
+            <Button type="submit" className="shrink-0 px-3">
+              Xem
+            </Button>
+            <Link
+              href={newerDay ? dayHref(newerDay.day_date, q) : "#"}
+              aria-disabled={!newerDay}
+              aria-label="Ngày kế tiếp"
+              className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--color-border)] ${
+                newerDay
+                  ? "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                  : "pointer-events-none text-[var(--color-muted)] opacity-40"
+              }`}
+            >
+              <ChevronRight size={16} />
+            </Link>
+          </form>
 
-      <Card className="mt-6">
-        <CardTitle>Bộ lọc & export</CardTitle>
-        <form
-          action="/summaries"
-          className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,1.5fr)_150px_150px_120px_auto_auto_auto_auto]"
-        >
-          <label className="relative block">
-            <Search
-              size={16}
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]"
-            />
-            <Input name="q" defaultValue={filters.q} placeholder="Tìm trong nội dung tóm tắt" className="pl-9" />
-          </label>
-          <Input name="from" type="date" defaultValue={filters.fromRaw} aria-label="Từ ngày" />
-          <Input name="to" type="date" defaultValue={filters.toRaw} aria-label="Đến ngày" />
-          <Select name="limit" defaultValue={String(filters.limit ?? 30)} ariaLabel="Số ngày" options={LIMIT_OPTIONS} />
-
-          <Button type="submit" className="gap-2">
-            <Search size={16} />
-            Lọc
-          </Button>
-          <Link
-            href="/summaries"
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] px-4 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-          >
-            <RotateCcw size={16} />
-            Reset
-          </Link>
-          <a
-            href={exportHref(params, "md")}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius)] bg-[var(--color-primary)] px-4 text-sm font-medium text-white hover:opacity-90"
-          >
-            <Download size={16} />
-            Markdown
-          </a>
-          <a
-            href={exportHref(params, "json")}
-            className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] px-4 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
-          >
-            <Download size={16} />
-            JSON
-          </a>
-        </form>
+          <form action="/summaries" className="flex min-w-0 flex-1 items-center gap-2">
+            <input type="hidden" name="day" value={selectedDate} />
+            <label className="relative block min-w-0 flex-1">
+              <Search
+                size={16}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-muted)]"
+              />
+              <Input name="q" defaultValue={q} placeholder="Tìm trong mọi bản tóm tắt" className="pl-9" />
+            </label>
+            <Button type="submit" variant="ghost" className="shrink-0 px-3" aria-label="Tìm">
+              <Search size={16} />
+            </Button>
+            {q ? (
+              <Link
+                href={dayHref(selectedDate)}
+                aria-label="Xoá tìm kiếm"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)]"
+              >
+                <X size={16} />
+              </Link>
+            ) : null}
+          </form>
+        </div>
       </Card>
 
-      {summaries.length === 0 ? (
-        <div className="mt-6">
-          <EmptyState>
-            Chưa có bản tóm tắt nào trong kho. Bản tin sẽ được lưu tự động mỗi sáng khi cron daily-summary chạy
-            (bản đang nằm trong bot_state cũng sẽ được cứu vào kho ở lần chạy kế tiếp).
-          </EmptyState>
-        </div>
-      ) : (
-        <div className="mt-6 flex flex-col gap-4">
-          {summaries.map((s) => {
-            const topSenders = parseJsonArray(s.top_senders_json);
-            return (
-              <Card key={s.id} className="p-4">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
-                  <NotebookText size={14} />
-                  <span className="text-sm font-semibold text-[var(--color-text)]">{s.day_label}</span>
-                  {s.total_messages !== null ? <Badge tone="ok">{s.total_messages} tin nhắn</Badge> : null}
-                  {s.unique_senders ? <Badge tone="ok">{s.unique_senders} người</Badge> : null}
-                  {s.images ? <Badge tone="warn">{s.images} ảnh</Badge> : null}
-                  {s.videos ? <Badge tone="warn">{s.videos} video</Badge> : null}
-                  {s.model ? <span className="font-mono">{s.model}</span> : null}
-                  {s.source !== "live" ? <Badge tone="warn">backfill</Badge> : null}
-                  <span>lưu lúc {fmtDateTime(s.created_at)}</span>
-                </div>
-                {topSenders.length > 0 ? (
-                  <p className="mt-2 text-xs text-[var(--color-muted)]">🔥 Sôi nổi nhất: {topSenders.join(", ")}</p>
+      {q ? (
+        <Card className="mt-4 p-4">
+          <CardTitle>
+            Kết quả tìm “{q}” — {searchResults.length} ngày khớp
+          </CardTitle>
+          {searchResults.length === 0 ? (
+            <p className="mt-3 text-sm text-[var(--color-muted)]">Không ngày nào chứa từ khoá này.</p>
+          ) : (
+            <div className="mt-3 flex flex-col gap-2">
+              {searchResults.map((r) => (
+                <Link
+                  key={r.day_date}
+                  href={dayHref(r.day_date, q)}
+                  className={`rounded-[var(--radius)] border px-3 py-2 text-sm transition-colors hover:bg-[var(--color-surface-2)] ${
+                    r.day_date === selectedDate
+                      ? "border-[var(--color-primary)]"
+                      : "border-[var(--color-border)]"
+                  }`}
+                >
+                  <span className="font-medium text-[var(--color-text)]">{r.day_label}</span>
+                  {r.total_messages !== null ? (
+                    <span className="ml-2 text-xs text-[var(--color-muted)]">{r.total_messages} tin</span>
+                  ) : null}
+                  <p className="mt-1 break-words text-xs leading-5 text-[var(--color-muted)]">
+                    {snippetAround(r.summary_text, q)}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          )}
+        </Card>
+      ) : null}
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        {/* Danh sách ngày: chỉ desktop — mobile đã có dropdown + nút chuyển ngày. */}
+        <Card className="hidden self-start p-2 lg:block">
+          <div className="max-h-[70vh] overflow-y-auto pr-1">
+            {days.map((d) => (
+              <Link
+                key={d.day_date}
+                href={dayHref(d.day_date, q)}
+                className={`flex items-baseline justify-between gap-2 rounded-[var(--radius)] px-3 py-2 text-sm transition-colors hover:bg-[var(--color-surface-2)] ${
+                  d.day_date === selectedDate
+                    ? "bg-[var(--color-surface-2)] font-semibold text-[var(--color-text)]"
+                    : "text-[var(--color-muted)]"
+                }`}
+              >
+                <span>{d.day_label}</span>
+                <span className="shrink-0 text-xs">{dayStats(d)}</span>
+              </Link>
+            ))}
+          </div>
+        </Card>
+
+        {/* Chi tiết ngày được chọn. */}
+        <div className="min-w-0">
+          {!selected ? (
+            <EmptyState>Không đọc được bản tóm tắt của ngày này.</EmptyState>
+          ) : (
+            <Card className="p-4 sm:p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <NotebookText size={16} className="text-[var(--color-muted)]" />
+                <h2 className="text-base font-semibold text-[var(--color-text)]">{selected.day_label}</h2>
+                {selected.total_messages !== null ? (
+                  <Badge tone="ok">{selected.total_messages} tin nhắn</Badge>
                 ) : null}
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--color-text)]">{s.summary_text}</p>
-              </Card>
-            );
-          })}
+                {selected.unique_senders ? <Badge tone="ok">{selected.unique_senders} người</Badge> : null}
+                {selected.images ? <Badge tone="warn">{selected.images} ảnh</Badge> : null}
+                {selected.videos ? <Badge tone="warn">{selected.videos} video</Badge> : null}
+                {selected.source !== "live" ? <Badge tone="muted">backfill</Badge> : null}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--color-muted)]">
+                <span>lưu lúc {fmtDateTime(selected.created_at)}</span>
+                {selected.model ? <span className="font-mono">{selected.model}</span> : null}
+              </div>
+              {topSenders.length > 0 ? (
+                <p className="mt-2 text-xs text-[var(--color-muted)]">🔥 Sôi nổi nhất: {topSenders.join(", ")}</p>
+              ) : null}
+
+              <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--color-text)]">
+                {selected.summary_text}
+              </p>
+
+              <div className="mt-5 flex flex-wrap gap-2 border-t border-[var(--color-border)] pt-4">
+                <ExportLink
+                  href={`/api/summaries/export?format=md&from=${selected.day_date}&to=${selected.day_date}`}
+                  label="MD ngày này"
+                />
+                <ExportLink href="/api/summaries/export?format=md" label="MD tất cả" />
+                <ExportLink href="/api/summaries/export?format=json" label="JSON tất cả" />
+              </div>
+            </Card>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-function Select({
-  name,
-  defaultValue,
-  ariaLabel,
-  options,
-}: {
-  name: string;
-  defaultValue: string;
-  ariaLabel: string;
-  options: { value: string; label: string }[];
-}) {
+function ExportLink({ href, label }: { href: string; label: string }) {
   return (
-    <select
-      name={name}
-      defaultValue={defaultValue}
-      aria-label={ariaLabel}
-      className="h-9 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-primary)]"
+    <a
+      href={href}
+      className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] px-3 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
     >
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+      <Download size={15} />
+      {label}
+    </a>
   );
+}
+
+function parseJsonArray(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
 }
