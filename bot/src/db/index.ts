@@ -10,7 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "2026-07-07-ops-dashboard-v2";
+const SCHEMA_VERSION = "2026-08-13-daily-summaries";
 
 let db: Database.Database | null = null;
 
@@ -30,7 +30,7 @@ export function getDb(): Database.Database {
   ).run({
     version: SCHEMA_VERSION,
     appliedAt: Date.now(),
-    note: "Member sync, bot health, cleanup operations dashboard, media metadata, bot error log.",
+    note: "Kho lưu vĩnh viễn bản tóm tắt hằng ngày (daily_summaries).",
   });
   return db;
 }
@@ -431,6 +431,101 @@ export function countGroupMediaBetween(
     )
     .get({ threadId, startTs, endTs }) as { images: number; videos: number };
   return { images: Number(row.images), videos: Number(row.videos) };
+}
+
+// ---- Daily summaries (kho lưu vĩnh viễn) ----
+
+export interface DailySummaryInput {
+  /** 'YYYY-MM-DD' theo giờ VN — khoá nghiệp vụ, mỗi ngày đúng 1 dòng. */
+  dayDate: string;
+  /** 'dd/mm/yyyy' đúng như in trong bản tin. */
+  dayLabel: string;
+  /** Epoch ms 00:00 giờ VN của ngày được tóm tắt. */
+  dayStartTs: number;
+  threadId: string;
+  /** Bản tóm tắt thô từ model (chưa chia tin, chưa gắn header/footer). */
+  summaryText: string;
+  /** Các tin nhắn đã compose để gửi đi. */
+  parts: string[];
+  totalMessages?: number | null;
+  includedMessages?: number | null;
+  uniqueSenders?: number | null;
+  images?: number | null;
+  videos?: number | null;
+  topSenders?: string[];
+  model?: string;
+  transcriptChars?: number | null;
+  source?: "live" | "state_backfill";
+  now: number;
+}
+
+function dailySummaryParams(input: DailySummaryInput): Record<string, unknown> {
+  return {
+    dayDate: input.dayDate,
+    dayLabel: input.dayLabel,
+    dayStartTs: input.dayStartTs,
+    threadId: input.threadId,
+    summaryText: input.summaryText,
+    partsJson: JSON.stringify(input.parts),
+    totalMessages: input.totalMessages ?? null,
+    includedMessages: input.includedMessages ?? null,
+    uniqueSenders: input.uniqueSenders ?? null,
+    images: input.images ?? null,
+    videos: input.videos ?? null,
+    topSendersJson: JSON.stringify(input.topSenders ?? []),
+    model: input.model ?? "",
+    transcriptChars: input.transcriptChars ?? null,
+    source: input.source ?? "live",
+    now: input.now,
+  };
+}
+
+const DAILY_SUMMARY_INSERT_SQL = `INTO daily_summaries
+    (day_date, day_label, day_start_ts, thread_id, summary_text, parts_json,
+     total_messages, included_messages, unique_senders, images, videos,
+     top_senders_json, model, transcript_chars, source, created_at)
+  VALUES
+    (@dayDate, @dayLabel, @dayStartTs, @threadId, @summaryText, @partsJson,
+     @totalMessages, @includedMessages, @uniqueSenders, @images, @videos,
+     @topSendersJson, @model, @transcriptChars, @source, @now)`;
+
+/**
+ * Lưu bản tóm tắt của 1 ngày (upsert theo day_date). Chạy lại cùng ngày sau khi
+ * state bị mất → bản sinh mới (đầy đủ thống kê) ghi đè bản cũ.
+ */
+export function saveDailySummary(input: DailySummaryInput): void {
+  getDb()
+    .prepare(
+      `INSERT ${DAILY_SUMMARY_INSERT_SQL}
+       ON CONFLICT(day_date) DO UPDATE SET
+         day_label = @dayLabel,
+         day_start_ts = @dayStartTs,
+         thread_id = @threadId,
+         summary_text = @summaryText,
+         parts_json = @partsJson,
+         total_messages = @totalMessages,
+         included_messages = @includedMessages,
+         unique_senders = @uniqueSenders,
+         images = @images,
+         videos = @videos,
+         top_senders_json = @topSendersJson,
+         model = @model,
+         transcript_chars = @transcriptChars,
+         source = @source,
+         created_at = @now`,
+    )
+    .run(dailySummaryParams(input));
+}
+
+/**
+ * Backfill từ bot_state cũ: chỉ chèn khi ngày đó CHƯA có trong kho — bản 'live'
+ * (đầy đủ thống kê) không bao giờ bị bản khôi phục nghèo dữ liệu hơn ghi đè.
+ */
+export function backfillDailySummaryIfMissing(input: DailySummaryInput): boolean {
+  const res = getDb()
+    .prepare(`INSERT OR IGNORE ${DAILY_SUMMARY_INSERT_SQL}`)
+    .run(dailySummaryParams({ ...input, source: input.source ?? "state_backfill" }));
+  return res.changes > 0;
 }
 
 // ---- Reads cho ranking / export ----

@@ -85,6 +85,32 @@ export function previousDayWindowVN(now: number): DayWindow {
   return { startTs, endTs, label };
 }
 
+/** 'YYYY-MM-DD' (giờ VN) từ epoch ms 00:00 VN — cột day_date của daily_summaries. */
+export function isoDateFromDayStartVN(dayStartTs: number): string {
+  return new Date(dayStartTs + VN_UTC_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Dựng lại DayWindow từ nhãn 'dd/mm/yyyy' (dùng khi backfill kho tóm tắt từ
+ * bot_state cũ — state chỉ lưu nhãn). Nhãn không hợp lệ → null.
+ */
+export function dayWindowFromLabelVN(label: string): DayWindow | null {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(label.trim());
+  if (!m) return null;
+  const [, dd, mm, yyyy] = m;
+  const startTs = Date.UTC(Number(yyyy), Number(mm) - 1, Number(dd)) - VN_UTC_OFFSET_MS;
+  // Date.UTC tự cuộn ngày không tồn tại (32/01 → 01/02) — round-trip lệch nhãn là không hợp lệ.
+  const roundTrip = new Date(startTs + VN_UTC_OFFSET_MS);
+  if (
+    roundTrip.getUTCDate() !== Number(dd) ||
+    roundTrip.getUTCMonth() + 1 !== Number(mm) ||
+    roundTrip.getUTCFullYear() !== Number(yyyy)
+  ) {
+    return null;
+  }
+  return { startTs, endTs: startTs + 24 * 60 * 60 * 1000, label: label.trim() };
+}
+
 function fmtTimeVN(ts: number): string {
   const d = new Date(ts + VN_UTC_OFFSET_MS);
   return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;

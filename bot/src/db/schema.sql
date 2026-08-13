@@ -226,6 +226,33 @@ CREATE TABLE IF NOT EXISTS cleanup_warnings (
   FOREIGN KEY (last_warned_run) REFERENCES scan_runs(id)
 );
 
+-- Kho lưu VĨNH VIỄN bản tóm tắt hằng ngày (bot_state chỉ giữ bản mới nhất để
+-- resume gửi — bị ghi đè mỗi ngày). Dữ liệu này để sau tổng hợp/phân tích/viết blog.
+-- source: 'live' (ghi ngay lúc tạo bản tin) | 'state_backfill' (khôi phục từ bot_state cũ,
+-- chỉ có parts đã compose nên các cột thống kê có thể NULL = không rõ).
+CREATE TABLE IF NOT EXISTS daily_summaries (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_date           TEXT NOT NULL,      -- 'YYYY-MM-DD' theo giờ VN (khoá nghiệp vụ, sort/filter được)
+  day_label          TEXT NOT NULL,      -- 'dd/mm/yyyy' đúng như in trong bản tin
+  day_start_ts       INTEGER NOT NULL,   -- epoch ms 00:00 giờ VN của ngày được tóm tắt
+  thread_id          TEXT NOT NULL DEFAULT '',
+  summary_text       TEXT NOT NULL,      -- bản tóm tắt thô từ model (chưa chia tin/chưa gắn header)
+  parts_json         TEXT NOT NULL DEFAULT '[]',  -- các tin nhắn đã compose gửi đi (JSON array)
+  total_messages     INTEGER,
+  included_messages  INTEGER,
+  unique_senders     INTEGER,
+  images             INTEGER,
+  videos             INTEGER,
+  top_senders_json   TEXT NOT NULL DEFAULT '[]',
+  model              TEXT NOT NULL DEFAULT '',
+  transcript_chars   INTEGER,
+  source             TEXT NOT NULL DEFAULT 'live',
+  created_at         INTEGER NOT NULL,
+  UNIQUE (day_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_summaries_day_start ON daily_summaries(day_start_ts);
+
 -- Trạng thái bot dạng key-value (warmup start, kỳ-đầu-đã-bỏ-qua...).
 CREATE TABLE IF NOT EXISTS bot_state (
   key        TEXT PRIMARY KEY,

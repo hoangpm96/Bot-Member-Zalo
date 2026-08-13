@@ -2,11 +2,13 @@ import { config } from "../config.js";
 import { runtimeConfig } from "../runtime-config.js";
 import {
   acquireLock,
+  backfillDailySummaryIfMissing,
   countGroupMediaBetween,
   getBotState,
   listGroupMessagesBetween,
   recordBotError,
   releaseLock,
+  saveDailySummary,
   setBotState,
 } from "../db/index.js";
 import { login, sendGroupText, sleep } from "../zalo/client.js";
@@ -14,7 +16,9 @@ import { sendTelegramText } from "../telegram.js";
 import {
   buildTranscript,
   composeSummaryMessages,
+  dayWindowFromLabelVN,
   isBotSummaryMessage,
+  isoDateFromDayStartVN,
   previousDayWindowVN,
   summarizeWithDeepSeek,
   topSenders,
@@ -204,6 +208,9 @@ export async function runDailySummary(): Promise<void> {
   try {
     // Đã gửi đủ hôm nay → skip; gửi dở / có đích mới → gửi phần thiếu từ parts đã lưu.
     const prev = readSendState();
+    // Kho daily_summaries ra đời sau tính năng tóm tắt — bản tin đang nằm trong
+    // bot_state (sắp bị ghi đè khi sang ngày mới) được cứu vào kho trước.
+    if (prev) backfillSummaryArchiveFromState(prev);
     if (prev?.dayLabel === window.label && prev.parts.length > 0) {
       if (isAllSent(prev, dests)) {
         console.log(`[daily-summary] Đã gửi đủ tóm tắt ngày ${window.label} cho mọi đích — bỏ qua.`);
@@ -237,7 +244,10 @@ export async function runDailySummary(): Promise<void> {
     }
     const media = countGroupMediaBetween(config.groupId, window.startTs, window.endTs);
 
+    const top = topSenders(messages);
     let parts: string[];
+    let summaryText: string;
+    let transcriptInfo: ReturnType<typeof buildTranscript> | null = null;
     if (messages.length === 0 && media.images === 0 && media.videos === 0) {
       // "Ngày yên ắng" chỉ đáng tin nếu listener còn sống — listener chết cả ngày
       // cũng cho ra DB trống y hệt. Heartbeat stale → cảnh báo admin, KHÔNG đăng
@@ -252,10 +262,12 @@ export async function runDailySummary(): Promise<void> {
         await notifyTelegramBestEffort(`⚠️ ${msg}`);
         return;
       }
-      parts = [`📋 Tóm tắt nhóm ngày ${window.label}\n\nHôm qua nhóm không có tin nhắn nào.`];
+      summaryText = "Hôm qua nhóm không có tin nhắn nào.";
+      parts = [`📋 Tóm tắt nhóm ngày ${window.label}\n\n${summaryText}`];
       console.log("[daily-summary] Không có tin nhắn trong ngày — gửi thông báo ngày yên ắng.");
     } else {
       const transcript = buildTranscript(messages);
+      transcriptInfo = transcript;
       console.log(
         `[daily-summary] ${transcript.totalMessages} tin nhắn từ ${transcript.uniqueSenders} người ` +
           `(đưa vào model ${transcript.includedMessages} tin, ${transcript.text.length} ký tự), ` +
@@ -268,6 +280,7 @@ export async function runDailySummary(): Promise<void> {
           ? await summarizeWithDeepSeek({ transcript: transcript.text, dayLabel: window.label, maxParts })
           : "- Trong ngày chỉ có ảnh/video, không có tin nhắn văn bản để tóm tắt.";
 
+      summaryText = summary;
       parts = composeSummaryMessages(
         {
           dayLabel: window.label,
@@ -277,7 +290,7 @@ export async function runDailySummary(): Promise<void> {
           uniqueSenders: transcript.uniqueSenders,
           images: media.images,
           videos: media.videos,
-          topSenders: topSenders(messages),
+          topSenders: top,
         },
         maxParts,
       );
@@ -289,6 +302,28 @@ export async function runDailySummary(): Promise<void> {
       );
       return;
     }
+
+    // Lưu VĨNH VIỄN vào kho daily_summaries TRƯỚC khi gửi — gửi lỗi thì bản tin
+    // vẫn còn nguyên cho việc phân tích/viết blog sau này.
+    saveDailySummary({
+      dayDate: isoDateFromDayStartVN(window.startTs),
+      dayLabel: window.label,
+      dayStartTs: window.startTs,
+      threadId: config.groupId,
+      summaryText,
+      parts,
+      totalMessages: messages.length,
+      includedMessages: transcriptInfo?.includedMessages ?? 0,
+      uniqueSenders: transcriptInfo?.uniqueSenders ?? 0,
+      images: media.images,
+      videos: media.videos,
+      topSenders: top,
+      model: messages.length > 0 ? config.deepseekModel : "",
+      transcriptChars: transcriptInfo ? transcriptInfo.text.length : null,
+      source: "live",
+      now: Date.now(),
+    });
+    console.log(`[daily-summary] Đã lưu bản tóm tắt ngày ${window.label} vào kho daily_summaries.`);
 
     // Ghi state TRƯỚC khi gửi để lần chạy lại resume đúng chỗ thay vì gửi trùng.
     const state: SummarySendState = {
@@ -302,6 +337,33 @@ export async function runDailySummary(): Promise<void> {
     await sendParts(state, dests);
   } finally {
     releaseLock(LOCK_KEY);
+  }
+}
+
+/**
+ * Cứu bản tin đang nằm trong bot_state vào kho daily_summaries nếu ngày đó chưa
+ * có (kho ra đời sau tính năng tóm tắt; state bị ghi đè mỗi ngày). State chỉ giữ
+ * parts đã compose nên summary_text là parts nối lại; thống kê ngoài
+ * totalMessages và model sinh bản tin đều không rõ → để NULL/rỗng.
+ */
+function backfillSummaryArchiveFromState(state: SummarySendState): void {
+  if (state.parts.length === 0) return;
+  const window = dayWindowFromLabelVN(state.dayLabel);
+  if (!window) return;
+  const inserted = backfillDailySummaryIfMissing({
+    dayDate: isoDateFromDayStartVN(window.startTs),
+    dayLabel: window.label,
+    dayStartTs: window.startTs,
+    threadId: config.groupId,
+    summaryText: state.parts.join("\n\n"),
+    parts: state.parts,
+    totalMessages: state.totalMessages,
+    now: state.createdAt > 0 ? state.createdAt : Date.now(),
+  });
+  if (inserted) {
+    console.log(
+      `[daily-summary] Đã cứu bản tin ngày ${state.dayLabel} từ bot_state vào kho daily_summaries (backfill).`,
+    );
   }
 }
 

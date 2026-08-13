@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildTranscript,
   composeSummaryMessages,
+  dayWindowFromLabelVN,
   isBotSummaryMessage,
+  isoDateFromDayStartVN,
   previousDayWindowVN,
   sanitizeDisplayName,
   topSenders,
@@ -53,6 +55,28 @@ test("previousDayWindowVN: gần nửa đêm VN vẫn ra đúng ngày hôm trư�
   const now = Date.UTC(2026, 7, 11, 16, 59, 0);
   const w = previousDayWindowVN(now);
   assert.equal(w.label, "10/08/2026");
+});
+
+test("dayWindowFromLabelVN: round-trip với previousDayWindowVN", () => {
+  const w = previousDayWindowVN(Date.UTC(2026, 7, 11, 0, 30, 0));
+  const parsed = dayWindowFromLabelVN(w.label);
+  assert.ok(parsed);
+  assert.equal(parsed.startTs, w.startTs);
+  assert.equal(parsed.endTs, w.endTs);
+  assert.equal(parsed.label, w.label);
+});
+
+test("dayWindowFromLabelVN: nhãn hỏng hoặc ngày không tồn tại → null", () => {
+  assert.equal(dayWindowFromLabelVN(""), null);
+  assert.equal(dayWindowFromLabelVN("2026-08-10"), null);
+  assert.equal(dayWindowFromLabelVN("1/8/2026"), null);
+  assert.equal(dayWindowFromLabelVN("32/01/2026"), null);
+  assert.equal(dayWindowFromLabelVN("29/02/2026"), null); // 2026 không nhuận
+});
+
+test("isoDateFromDayStartVN: ra đúng 'YYYY-MM-DD' theo giờ VN", () => {
+  const w = previousDayWindowVN(Date.UTC(2026, 7, 11, 0, 30, 0)); // ngày 10/08 VN
+  assert.equal(isoDateFromDayStartVN(w.startTs), "2026-08-10");
 });
 
 test("truncateSafe: không cắt giữa surrogate pair (emoji)", () => {

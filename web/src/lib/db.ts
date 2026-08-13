@@ -339,6 +339,33 @@ export interface MessageFilters {
   limit?: number;
 }
 
+export interface DailySummaryRow {
+  id: number;
+  day_date: string;
+  day_label: string;
+  day_start_ts: number;
+  thread_id: string;
+  summary_text: string;
+  parts_json: string;
+  total_messages: number | null;
+  included_messages: number | null;
+  unique_senders: number | null;
+  images: number | null;
+  videos: number | null;
+  top_senders_json: string;
+  model: string;
+  transcript_chars: number | null;
+  source: string;
+  created_at: number;
+}
+
+export interface DailySummaryFilters {
+  q?: string;
+  from?: number | null;
+  to?: number | null;
+  limit?: number;
+}
+
 export type LeaderboardPeriod = "7d" | "30d" | "all";
 
 export interface LeaderboardRow {
@@ -993,6 +1020,49 @@ export function listGroupMediaEvents(filters: MessageFilters = {}): GroupMediaEv
        LIMIT @limit`,
     )
     .all(where.params) as GroupMediaEventRow[];
+}
+
+// ---- Daily summaries (kho tóm tắt hằng ngày, bot ghi) ----
+
+function dailySummaryWhere(filters: DailySummaryFilters): {
+  sql: string;
+  params: Record<string, string | number | null>;
+} {
+  const clauses: string[] = [];
+  const q = filters.q?.trim().toLowerCase() ?? "";
+  const params: Record<string, string | number | null> = {
+    like: `%${q}%`,
+    from: filters.from ?? null,
+    to: filters.to ?? null,
+    limit: Math.min(Math.max(filters.limit ?? 100, 1), 1000),
+  };
+  if (q) clauses.push(`(LOWER(summary_text) LIKE @like OR day_label LIKE @like OR day_date LIKE @like)`);
+  if (filters.from) clauses.push(`day_start_ts >= @from`);
+  if (filters.to) clauses.push(`day_start_ts <= @to`);
+  return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
+}
+
+export function listDailySummaries(filters: DailySummaryFilters = {}): DailySummaryRow[] {
+  if (!tableExists("daily_summaries")) return [];
+  const where = dailySummaryWhere(filters);
+  return getDb()
+    .prepare(
+      `SELECT *
+       FROM daily_summaries
+       ${where.sql}
+       ORDER BY day_date DESC
+       LIMIT @limit`,
+    )
+    .all(where.params) as DailySummaryRow[];
+}
+
+export function countDailySummaries(filters: DailySummaryFilters = {}): number {
+  if (!tableExists("daily_summaries")) return 0;
+  const where = dailySummaryWhere(filters);
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) AS n FROM daily_summaries ${where.sql}`)
+    .get(where.params) as { n: number };
+  return row.n;
 }
 
 // ---- bot_state (config) ----
