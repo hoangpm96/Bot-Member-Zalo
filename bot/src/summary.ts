@@ -190,9 +190,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Gọi DeepSeek /chat/completions: timeout 90s/lần gọi, retry 2 lần (backoff)
- * cho lỗi mạng/429/5xx — cron chỉ chạy 1 lần/ngày nên một nhịp lỗi không được
- * phép làm mất cả bản tin. Ném lỗi rõ ràng khi hết lượt retry.
+ * Gọi DeepSeek /chat/completions: timeout 10 phút/lần gọi (reasoning của dòng
+ * V4 trên transcript dài mất vài phút — 90s cũ của deepseek-chat không đủ),
+ * retry 2 lần (backoff) cho lỗi mạng/429/5xx — cron chỉ chạy 1 lần/ngày nên
+ * một nhịp lỗi không được phép làm mất cả bản tin. Ném lỗi rõ khi hết lượt.
  */
 export async function summarizeWithDeepSeek(input: {
   transcript: string;
@@ -252,7 +253,7 @@ export async function summarizeWithDeepSeek(input: {
     try {
       const resp = await fetch("https://api.deepseek.com/chat/completions", {
         method: "POST",
-        signal: AbortSignal.timeout(90_000),
+        signal: AbortSignal.timeout(600_000),
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${config.deepseekApiKey}`,
