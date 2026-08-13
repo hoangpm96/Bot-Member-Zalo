@@ -79,6 +79,24 @@ export const runtimeConfig = {
     return dbInt("cfg:approval_timeout_hours", 1, 240) ?? config.approvalTimeoutHours;
   },
 
+  // ---- Tóm tắt hằng ngày ----
+
+  /**
+   * Topic Telegram nhận bản tin. Trong DB: 0 = General (ghi đè cả .env),
+   * chưa đặt → fallback .env. Trả null = gửi General (không kèm thread id).
+   */
+  get summaryTelegramTopicId(): number | null {
+    const v = dbInt("cfg:summary_telegram_topic_id", 0, 999_999_999);
+    if (v === null) return config.summaryTelegramTopicId;
+    return v === 0 ? null : v;
+  },
+  get summaryMaxParts(): number {
+    return dbInt("cfg:summary_max_parts", 1, 9) ?? config.summaryMaxParts;
+  },
+  get summaryGroupGapMinutes(): number {
+    return dbInt("cfg:summary_group_gap_minutes", 0, 720) ?? config.summaryGroupGapMinutes;
+  },
+
   // ---- Kiểm duyệt real-time theo từ khoá ----
 
   /** Bật/tắt toàn bộ tính năng lọc từ khoá. Mặc định TẮT (an toàn). */

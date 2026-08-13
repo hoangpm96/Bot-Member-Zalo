@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { runtimeConfig } from "../runtime-config.js";
 import {
   acquireLock,
   countGroupMediaBetween,
@@ -117,29 +118,27 @@ async function sendParts(state: SummarySendState, dests: SummaryDestination[]): 
   for (const dest of dests) {
     const already = state.sent[dest.key] ?? 0;
     if (already >= state.parts.length) continue;
-    if (dest.kind === "zalo" && sentToZaloBefore && config.summaryGroupGapMinutes > 0) {
-      const gapMs = Math.round(
-        config.summaryGroupGapMinutes * 60_000 * (1 + Math.random() * 0.25),
-      );
+    const gapMinutes = runtimeConfig.summaryGroupGapMinutes;
+    if (dest.kind === "zalo" && sentToZaloBefore && gapMinutes > 0) {
+      const gapMs = Math.round(gapMinutes * 60_000 * (1 + Math.random() * 0.25));
       console.log(
         `[daily-summary] Nghỉ ${Math.round(gapMs / 1000)}s trước khi gửi ${dest.key} (giãn cách chống lộ bot)...`,
       );
       await sleep(gapMs);
     }
     for (let i = already; i < state.parts.length; i += 1) {
-      if (sentInRun > 0) await sleep(config.zaloThrottleMs);
+      if (sentInRun > 0) await sleep(runtimeConfig.zaloThrottleMs);
       const part = state.parts[i] ?? "";
       if (dest.kind === "zalo") {
         api ??= await login();
         await sendGroupText(api, dest.groupId, part);
       } else {
+        const topicId = runtimeConfig.summaryTelegramTopicId;
         await sendTelegramText(
           part,
           {
             chatId: dest.chatId,
-            ...(config.summaryTelegramTopicId !== null
-              ? { messageThreadId: config.summaryTelegramTopicId }
-              : {}),
+            ...(topicId !== null ? { messageThreadId: topicId } : {}),
           },
           config.summaryTelegramBotToken || config.telegramBotToken,
         );
@@ -263,9 +262,10 @@ export async function runDailySummary(): Promise<void> {
           `${media.images} ảnh, ${media.videos} video. Đang gọi DeepSeek (${config.deepseekModel})...`,
       );
 
+      const maxParts = runtimeConfig.summaryMaxParts;
       const summary =
         messages.length > 0
-          ? await summarizeWithDeepSeek({ transcript: transcript.text, dayLabel: window.label })
+          ? await summarizeWithDeepSeek({ transcript: transcript.text, dayLabel: window.label, maxParts })
           : "- Trong ngày chỉ có ảnh/video, không có tin nhắn văn bản để tóm tắt.";
 
       parts = composeSummaryMessages(
@@ -279,7 +279,7 @@ export async function runDailySummary(): Promise<void> {
           videos: media.videos,
           topSenders: topSenders(messages),
         },
-        config.summaryMaxParts,
+        maxParts,
       );
     }
 

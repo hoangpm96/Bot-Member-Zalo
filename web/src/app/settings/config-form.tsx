@@ -4,14 +4,25 @@ import { useState } from "react";
 import { Card, CardTitle, Button, Input } from "@/components/ui";
 import { CONFIG_META, CONFIG_DEFAULTS, type ConfigField, type ConfigValues } from "@/lib/config-meta";
 
-const FIELDS: ConfigField[] = [
-  "targetMemberCount",
-  "warmupDays",
-  "maxKicksPerRun",
-  "kickThrottleMs",
-  "zaloThrottleMs",
-  "approvalTimeoutHours",
+const GROUPS: { title: string; fields: ConfigField[] }[] = [
+  {
+    title: "Tham số dọn dẹp",
+    fields: [
+      "targetMemberCount",
+      "warmupDays",
+      "maxKicksPerRun",
+      "kickThrottleMs",
+      "zaloThrottleMs",
+      "approvalTimeoutHours",
+    ],
+  },
+  {
+    title: "Tóm tắt hằng ngày",
+    fields: ["summaryTelegramTopicId", "summaryMaxParts", "summaryGroupGapMinutes"],
+  },
 ];
+
+const FIELDS: ConfigField[] = GROUPS.flatMap((g) => g.fields);
 
 export function ConfigForm({ initial }: { initial: ConfigValues }) {
   const [values, setValues] = useState<Record<ConfigField, string>>(() => {
@@ -44,14 +55,14 @@ export function ConfigForm({ initial }: { initial: ConfigValues }) {
     }
   }
 
-  return (
-    <Card>
-      <CardTitle>Tham số dọn dẹp</CardTitle>
+  return GROUPS.map((group) => (
+    <Card key={group.title}>
+      <CardTitle>{group.title}</CardTitle>
       <p className="mt-1 mb-4 text-xs text-[var(--color-muted)]">
         Lưu vào DB; bot ưu tiên đọc giá trị ở đây (fallback .env nếu để trống).
       </p>
       <div className="flex flex-col gap-4">
-        {FIELDS.map((f) => {
+        {group.fields.map((f) => {
           const meta = CONFIG_META[f];
           return (
             <div key={f} className="flex flex-col gap-1.5">
@@ -83,5 +94,5 @@ export function ConfigForm({ initial }: { initial: ConfigValues }) {
         })}
       </div>
     </Card>
-  );
+  ));
 }

@@ -21,6 +21,9 @@ export function readConfig(): ConfigValues {
     kickThrottleMs: readNum(CONFIG_KEYS.kickThrottleMs),
     zaloThrottleMs: readNum(CONFIG_KEYS.zaloThrottleMs),
     approvalTimeoutHours: readNum(CONFIG_KEYS.approvalTimeoutHours),
+    summaryTelegramTopicId: readNum(CONFIG_KEYS.summaryTelegramTopicId),
+    summaryMaxParts: readNum(CONFIG_KEYS.summaryMaxParts),
+    summaryGroupGapMinutes: readNum(CONFIG_KEYS.summaryGroupGapMinutes),
   };
 }
 

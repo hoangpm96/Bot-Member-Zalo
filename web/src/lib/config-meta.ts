@@ -10,6 +10,9 @@ export const CONFIG_KEYS = {
   kickThrottleMs: "cfg:kick_throttle_ms",
   zaloThrottleMs: "cfg:zalo_throttle_ms",
   approvalTimeoutHours: "cfg:approval_timeout_hours",
+  summaryTelegramTopicId: "cfg:summary_telegram_topic_id",
+  summaryMaxParts: "cfg:summary_max_parts",
+  summaryGroupGapMinutes: "cfg:summary_group_gap_minutes",
 } as const;
 
 export type ConfigField = keyof typeof CONFIG_KEYS;
@@ -21,6 +24,9 @@ export interface ConfigValues {
   kickThrottleMs: number | null;
   zaloThrottleMs: number | null;
   approvalTimeoutHours: number | null;
+  summaryTelegramTopicId: number | null;
+  summaryMaxParts: number | null;
+  summaryGroupGapMinutes: number | null;
 }
 
 /** Mặc định (khớp brainstorm) — placeholder khi chưa đặt trong DB. */
@@ -31,6 +37,9 @@ export const CONFIG_DEFAULTS: Record<ConfigField, number> = {
   kickThrottleMs: 120000,
   zaloThrottleMs: 1500,
   approvalTimeoutHours: 48,
+  summaryTelegramTopicId: 0,
+  summaryMaxParts: 3,
+  summaryGroupGapMinutes: 10,
 };
 
 export const CONFIG_META: Record<
@@ -43,6 +52,9 @@ export const CONFIG_META: Record<
   kickThrottleMs: { label: "Nghỉ giữa mỗi lần kick", unit: "ms", min: 1000, max: 3600000, hint: "Chống Zalo flag. 120000 = 2 phút." },
   zaloThrottleMs: { label: "Nghỉ giữa call Zalo nặng", unit: "ms", min: 200, max: 60000, hint: "Throttle khi đọc member/poll." },
   approvalTimeoutHours: { label: "Timeout chờ duyệt", unit: "giờ", min: 1, max: 240, hint: "Không phản hồi sau N giờ thì tự kick." },
+  summaryTelegramTopicId: { label: "Topic Telegram nhận bản tin", unit: "ID", min: 0, max: 999999999, hint: "0 = gửi vào General. Lấy ID: mở topic → copy link 1 tin nhắn → t.me/c/<chat>/<ID topic>/<tin> (số ở giữa)." },
+  summaryMaxParts: { label: "Số tin tối đa mỗi bản tóm tắt", unit: "tin", min: 1, max: 9, hint: "Bản tin dài tự chia thành tối đa N tin đánh số (k/N). Tăng = ngày sôi động được tóm chi tiết hơn." },
+  summaryGroupGapMinutes: { label: "Giãn cách giữa các group Zalo", unit: "phút", min: 0, max: 720, hint: "Nghỉ giữa các group Zalo khi gửi cùng bản tin (chống lộ bot). 0 = gửi liền. Không áp dụng cho Telegram." },
 };
 
 /** Validate giá trị theo CONFIG_META. Trả lỗi (string) nếu sai, null nếu OK. */

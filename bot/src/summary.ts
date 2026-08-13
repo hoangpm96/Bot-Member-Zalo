@@ -215,10 +215,13 @@ function sleep(ms: number): Promise<void> {
 export async function summarizeWithDeepSeek(input: {
   transcript: string;
   dayLabel: string;
+  /** Trần số tin của bản tin (ảnh hưởng độ dài dặn model + max_tokens). Mặc định theo .env. */
+  maxParts?: number;
 }): Promise<string> {
   if (!config.deepseekApiKey) {
     throw new Error("Thiếu DEEPSEEK_API_KEY trong .env");
   }
+  const maxParts = input.maxParts ?? config.summaryMaxParts;
 
   const system =
     "Bạn viết bản tóm tắt hội thoại nhóm Zalo tiếng Việt cho NGƯỜI KHÔNG CÓ MẶT TRONG NHÓM — " +
@@ -273,7 +276,7 @@ export async function summarizeWithDeepSeek(input: {
     "không nhắc lại ở mục khác. Khi phải cắt bớt cho vừa độ dài: hy sinh mục dưới trước để " +
     "giữ độ sâu cho mục trên. " +
     "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown đậm/nghiêng vì Zalo không render. " +
-    `Toàn bộ dưới ${summaryTargetChars(config.summaryMaxParts)} ký tự — ngày nhiều nội dung hãy TẬN DỤNG ` +
+    `Toàn bộ dưới ${summaryTargetChars(maxParts)} ký tự — ngày nhiều nội dung hãy TẬN DỤNG ` +
     "giới hạn này để viết chi tiết; ngày ít hoạt động thì viết ngắn thôi. " +
     "Khi log quá dài không thể kể hết trong giới hạn: ƯU TIÊN ĐỘ SÂU HƠN ĐỘ PHỦ — chọn những thảo luận " +
     "quan trọng/sôi nổi nhất để tóm tắt chi tiết, các chủ đề nhỏ gom lại một dòng cuối; " +
@@ -307,8 +310,8 @@ export async function summarizeWithDeepSeek(input: {
           ],
           // Tóm tắt bám dữ liệu → temperature thấp cho output ổn định, ít bịa.
           temperature: 0.3,
-          // Chặn model viết tràn quá sức chứa SUMMARY_MAX_PARTS tin Zalo.
-          max_tokens: summaryMaxTokens(config.summaryMaxParts),
+          // Chặn model viết tràn quá sức chứa maxParts tin Zalo.
+          max_tokens: summaryMaxTokens(maxParts),
           stream: false,
         }),
       });
