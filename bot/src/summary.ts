@@ -20,11 +20,13 @@ import type { GroupMessageRow } from "./db/index.js";
 const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 /**
- * Trần ký tự transcript đưa vào model. deepseek-chat context 64K token; tiếng
- * Việt nhiều dấu/emoji có thể tokenize gần 1 token/ký tự nên chừa biên rộng:
- * 40K ký tự + system prompt + max_tokens đầu ra vẫn dưới trần thoải mái.
+ * Trần ký tự transcript đưa vào model. Đo thực tế trên deepseek-v4-flash
+ * (13/08/2026): tiếng Việt ~1.9 ký tự/token và context nhận ≥275K token —
+ * 80K ký tự (~42K token) + system prompt + max_tokens vẫn dưới trần rất xa.
+ * Trần này giờ chủ yếu là phanh chi phí/latency, không phải giới hạn model;
+ * ngày 12/08 chat sôi nổi đã chạm 32K nên để 40K cũ là quá sát.
  */
-export const TRANSCRIPT_MAX_CHARS = 40_000;
+export const TRANSCRIPT_MAX_CHARS = 80_000;
 
 /** Trần ký tự CỨNG của MỖI tin gửi Zalo — tin quá dài dễ bị Zalo cắt/từ chối. */
 export const SUMMARY_MAX_CHARS = 3_000;
