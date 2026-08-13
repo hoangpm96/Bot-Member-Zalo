@@ -49,6 +49,10 @@ CRON_TZ=Asia/Ho_Chi_Minh
 # Poll voter backup sync. Listener also runs this every 6h; this cron is idempotent fallback.
 17 */6 * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-votes >> "$LOG_DIR/sync-votes.log" 2>&1
 
+# Push interaction leaderboard to bahub.vn Supabase (site_settings.zalo_leaderboard).
+# Needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.
+*/30 * * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-leaderboard >> "$LOG_DIR/sync-leaderboard.log" 2>&1
+
 # Monthly group warning. Sends only because DRY_RUN=0 and SEND_GROUP_WARNINGS=1 are set here.
 0 9 25 * * cd "$BOT_DIR" && DRY_RUN=0 SEND_GROUP_WARNINGS=1 "$NODE_BIN" "$BOT_DIR/dist/index.js" cleanup-warn >> "$LOG_DIR/cleanup-warn.log" 2>&1
 

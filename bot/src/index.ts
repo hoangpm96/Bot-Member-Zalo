@@ -7,6 +7,7 @@ import { runHealthCheck } from "./commands/health-check.js";
 import { runImportInteractions } from "./commands/import-interactions.js";
 import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
+import { runSyncLeaderboard } from "./commands/sync-leaderboard.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
 import { runTelegramFindTopic, runTelegramForwardTest } from "./commands/telegram-forward.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
@@ -37,6 +38,7 @@ Cách dùng:
   npm run check-permissions # kiểm tra quyền bot trong group (không kick/xoá thật)
   npm run health-check      # cron: báo Telegram nếu bot heartbeat stale
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
+  npm run sync-leaderboard  # cron: đẩy bảng xếp hạng lên Supabase → hiện ở bahub.vn/leaderboard
   npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
   npm run telegram-find-topic # tìm chat ID + forum topic ID từ một message mới
   npm run telegram-forward-test # gửi thử vào đúng đích forward Zalo
@@ -74,6 +76,9 @@ async function main(): Promise<void> {
       break;
     case "sync-votes":
       await runSyncVotes();
+      break;
+    case "sync-leaderboard":
+      await runSyncLeaderboard();
       break;
     case "telegram-test":
       await runTelegramTest();
