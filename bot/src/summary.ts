@@ -35,15 +35,25 @@ export const MAX_SUMMARY_PARTS = 3;
 /**
  * Độ dài mục tiêu dặn model theo trần số tin: ~1500 ký tự "ruột" mỗi tin —
  * nằm thoải mái dưới sức chứa thật (~2950/tin) để gần như không bao giờ phải
- * cắt gọn. maxTokens chặn cứng ở tầng API theo cùng tỷ lệ (tiếng Việt ~2-3
- * ký tự/token nên hệ số 0.6 là đủ dư), clamp 8000 = trần output deepseek-chat.
+ * cắt gọn.
  */
 export function summaryTargetChars(maxParts: number): number {
   return maxParts * 1_500;
 }
 
+/**
+ * Dòng DeepSeek V4 mặc định BẬT reasoning và token suy nghĩ TÍNH VÀO max_tokens.
+ * Nếu max_tokens chỉ vừa đủ phần trả lời thì reasoning ăn hết ngân sách →
+ * content rỗng với finish_reason "length" (HTTP vẫn 200) — sự cố 13/08/2026.
+ * Ngân sách này cộng thêm cho phần suy nghĩ, rộng rãi tới mức không bao giờ
+ * chạm (reasoning tóm tắt thực tế chỉ vài nghìn token); max_tokens vẫn giữ
+ * làm phanh chi phí cho ca model sinh lặp vô hạn.
+ */
+const REASONING_TOKENS_BUDGET = 30_000;
+
 function summaryMaxTokens(maxParts: number): number {
-  return Math.min(Math.ceil(summaryTargetChars(maxParts) * 0.6), 8_000);
+  // Tiếng Việt ~2-3 ký tự/token nên hệ số 0.6 đủ dư cho phần trả lời.
+  return Math.ceil(summaryTargetChars(maxParts) * 0.6) + REASONING_TOKENS_BUDGET;
 }
 
 /** Trần ký tự 1 tin nhắn trong transcript — tin paste dài bất thường bị cắt gọn. */
@@ -274,11 +284,18 @@ export async function summarizeWithDeepSeek(input: {
       }
 
       const data = (await resp.json()) as {
-        choices?: { message?: { content?: string } }[];
+        choices?: { message?: { content?: string }; finish_reason?: string }[];
+        usage?: { completion_tokens_details?: { reasoning_tokens?: number } };
       };
-      const content = data.choices?.[0]?.message?.content?.trim();
+      const choice = data.choices?.[0];
+      const content = choice?.message?.content?.trim();
       if (!content) {
-        throw new Error("DeepSeek trả response không có nội dung tóm tắt.");
+        // finish_reason "length" + reasoning_tokens cao = reasoning ăn hết max_tokens.
+        throw new Error(
+          "DeepSeek trả response không có nội dung tóm tắt " +
+            `(finish_reason=${choice?.finish_reason ?? "?"}, ` +
+            `reasoning_tokens=${data.usage?.completion_tokens_details?.reasoning_tokens ?? "?"}).`,
+        );
       }
       return content;
     } catch (e) {
