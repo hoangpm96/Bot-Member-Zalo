@@ -536,6 +536,47 @@ export function hasDailySummaryForDate(dayDate: string): boolean {
   return row !== undefined;
 }
 
+/** Dòng daily_summaries rút gọn cho lệnh sync-summaries (không lấy parts_json). */
+export interface DailySummarySyncRow {
+  day_date: string;
+  day_label: string;
+  summary_text: string;
+  total_messages: number | null;
+  included_messages: number | null;
+  unique_senders: number | null;
+  images: number | null;
+  videos: number | null;
+  top_senders_json: string;
+  model: string;
+  source: string;
+  created_at: number;
+}
+
+/**
+ * Các bản tóm tắt cần đẩy lên bahub.vn: lấy ngày có created_at > mốc đã sync.
+ * created_at được ghi lại mỗi lần upsert (saveDailySummary), nên ngày cũ được
+ * tóm tắt lại cũng lọt vào đây. Sắp created_at tăng dần để lệnh sync ghi mốc
+ * theo đúng thứ tự đã đẩy — đứt giữa chừng thì lần sau chạy tiếp, không sót.
+ */
+export function listDailySummariesForSync(
+  cursor: { createdAt: number; dayDate: string },
+  limit: number,
+): DailySummarySyncRow[] {
+  // Con trỏ ghép (created_at, day_date): backfill chạy vòng lặp nhanh có thể
+  // ghi nhiều ngày trong cùng một mili-giây — chỉ so created_at là mất ngày.
+  return getDb()
+    .prepare(
+      `SELECT day_date, day_label, summary_text, total_messages, included_messages,
+              unique_senders, images, videos, top_senders_json, model, source, created_at
+         FROM daily_summaries
+        WHERE created_at > @createdAt
+           OR (created_at = @createdAt AND day_date > @dayDate)
+        ORDER BY created_at ASC, day_date ASC
+        LIMIT @limit`,
+    )
+    .all({ createdAt: cursor.createdAt, dayDate: cursor.dayDate, limit }) as DailySummarySyncRow[];
+}
+
 /** Mốc ts của tin nhắn thành viên đầu tiên trong kho — điểm bắt đầu quét backfill. */
 export function getEarliestGroupMessageTs(threadId: string): number | null {
   const row = getDb()

@@ -19,6 +19,7 @@
     "health-check": "tsx src/index.ts health-check",
     "sync-votes": "tsx src/index.ts sync-votes",
     "sync-leaderboard": "tsx src/index.ts sync-leaderboard",
+    "sync-summaries": "tsx src/index.ts sync-summaries",
     "telegram-test": "tsx src/index.ts telegram-test",
     "telegram-find-topic": "tsx src/index.ts telegram-find-topic",
     "telegram-forward-test": "tsx src/index.ts telegram-forward-test",
