@@ -113,6 +113,20 @@ export function sanitizeDisplayName(name: string, fallback: string): string {
   return truncateSafe(clean, DISPLAY_NAME_MAX_CHARS);
 }
 
+/** Tiền tố tiêu đề bản tin — dùng chung cho composeSummaryMessages và bộ lọc anti-loop. */
+const SUMMARY_HEADER_PREFIX = "📋 Tóm tắt nhóm ngày";
+
+/**
+ * Tin nhắn do chính bot đăng (bản tóm tắt hằng ngày / bản gửi thử 🧪) — phải
+ * LOẠI khỏi dữ liệu tóm tắt: GROUP_ID có thể nằm trong SUMMARY_GROUP_ID nên bản
+ * tin hôm trước quay lại thành "tin nhắn của ngày", không lọc sẽ thành vòng
+ * lặp tự tóm tắt chính mình (sự cố 13/08/2026: bản tin 12/08 lẫn nội dung
+ * ngày 11/08, tin cũ bị model trộn với thảo luận mới thành câu sai nghĩa).
+ */
+export function isBotSummaryMessage(text: string): boolean {
+  return text.startsWith(SUMMARY_HEADER_PREFIX) || text.startsWith("🧪");
+}
+
 export interface Transcript {
   text: string;
   totalMessages: number;
@@ -228,6 +242,16 @@ export async function summarizeWithDeepSeek(input: {
     "lời khuyên hay sự kiện nghiêm túc. Mỗi gạch đầu dòng CHỈ MỘT Ý — không ghép hai ý không liên quan " +
     "vào cùng dòng bằng dấu chấm phẩy. Đoạn nào chính bạn không chắc hiểu đúng thì bỏ qua — " +
     "thà thiếu còn hơn tóm sai nghĩa. " +
+    "GIỮ ĐÚNG TỪ GỌI TÊN: người nhắn gọi sự vật/sự kiện bằng từ gì thì dùng đúng từ đó " +
+    "(log nói 'workshop' thì không viết thành 'lớp học' và ngược lại) — tự đổi tên gọi rất dễ sai nghĩa. " +
+    "Hai hoạt động/sự kiện khác nhau (vd một khoá học và một buổi offline/workshop) là hai chuyện riêng: " +
+    "TUYỆT ĐỐI không gộp vào một gạch đầu dòng hay suy diễn cái này chính là cái kia, " +
+    "kể cả khi cùng một người khởi xướng. " +
+    "TIN DÁN LẠI: log có thể lẫn bản tóm tắt của ngày trước được thành viên dán lại — nhận dạng: " +
+    "tin dài gồm nhiều gạch đầu dòng tường thuật lời nhiều người ('A nói..., B gợi ý...') " +
+    "hoặc bắt đầu bằng '📋 Tóm tắt'. Nội dung bên trong tin dán lại là CHUYỆN CŨ của ngày trước: " +
+    "KHÔNG đưa vào bản tóm tắt như sự kiện của ngày, chỉ nhắc tới khi thành viên bàn tiếp về nó " +
+    "bằng tin nhắn mới. " +
     "BỐI CẢNH NHÓM: đây là nhóm cộng đồng IT Business Analyst — nội dung mang chất nhóm nhất là " +
     "chuyên môn BA/Product Owner và chuyện áp dụng AI vào công việc; ngoài ra có tư vấn học " +
     "hành/nghề nghiệp và tán gẫu đời thường. " +
@@ -361,7 +385,7 @@ export function composeSummaryMessages(
   if (input.images > 0) statsParts.push(`${input.images} ảnh`);
   if (input.videos > 0) statsParts.push(`${input.videos} video`);
 
-  const header = `📋 Tóm tắt nhóm ngày ${input.dayLabel}`;
+  const header = `${SUMMARY_HEADER_PREFIX} ${input.dayLabel}`;
   const footerLines = [`📊 ${statsParts.join(" · ")}`];
   if (input.topSenders.length > 0) {
     footerLines.push(`🔥 Sôi nổi nhất: ${input.topSenders.join(", ")}`);

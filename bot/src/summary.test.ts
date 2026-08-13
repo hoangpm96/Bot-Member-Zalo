@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildTranscript,
   composeSummaryMessages,
+  isBotSummaryMessage,
   previousDayWindowVN,
   sanitizeDisplayName,
   topSenders,
@@ -105,6 +106,14 @@ test("buildTranscript: tin quá dài trong transcript bị cắt còn 500 ký t�
   const t = buildTranscript([msg({ text: "x".repeat(2000) })]);
   assert.ok(t.text.length < 600);
   assert.ok(t.text.endsWith("…"));
+});
+
+test("isBotSummaryMessage: nhận diện bản tin bot (kể cả đánh số phần) và bản gửi thử, không đụng tin thường", () => {
+  assert.equal(isBotSummaryMessage("📋 Tóm tắt nhóm ngày 12/08/2026\n\n- nội dung"), true);
+  assert.equal(isBotSummaryMessage("📋 Tóm tắt nhóm ngày 12/08/2026 (2/4)\n\n- nội dung"), true);
+  assert.equal(isBotSummaryMessage("🧪 GỬI THỬ FORMAT MỚI\n\n📋 Tóm tắt nhóm ngày 12/08/2026"), true);
+  assert.equal(isBotSummaryMessage("hôm qua có bản 📋 Tóm tắt hay phết"), false);
+  assert.equal(isBotSummaryMessage("- Hoàng Phan giới thiệu BA-Kit"), false);
 });
 
 test("topSenders: đếm theo người, sắp giảm dần, tên được sanitize", () => {

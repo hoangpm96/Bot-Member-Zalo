@@ -13,6 +13,7 @@ import { sendTelegramText } from "../telegram.js";
 import {
   buildTranscript,
   composeSummaryMessages,
+  isBotSummaryMessage,
   previousDayWindowVN,
   summarizeWithDeepSeek,
   topSenders,
@@ -226,7 +227,15 @@ export async function runDailySummary(): Promise<void> {
         `→ ${dests.map((d) => d.key).join(", ")}.`,
     );
 
-    const messages = listGroupMessagesBetween(config.groupId, window.startTs, window.endTs);
+    // GROUP_ID có thể nằm trong SUMMARY_GROUP_ID → bản tin hôm trước do bot đăng
+    // lại thành "tin nhắn của ngày"; loại ra kẻo tự tóm tắt lại chính mình.
+    const rawMessages = listGroupMessagesBetween(config.groupId, window.startTs, window.endTs);
+    const messages = rawMessages.filter((m) => !isBotSummaryMessage(m.text));
+    if (messages.length < rawMessages.length) {
+      console.log(
+        `[daily-summary] Loại ${rawMessages.length - messages.length} tin là bản tóm tắt cũ của bot khỏi dữ liệu.`,
+      );
+    }
     const media = countGroupMediaBetween(config.groupId, window.startTs, window.endTs);
 
     let parts: string[];
