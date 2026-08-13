@@ -25,7 +25,8 @@ import {
 } from "../summary.js";
 
 const STATE_KEY_LAST = "daily_summary_last";
-const LOCK_KEY = "daily_summary_lock";
+/** Dùng chung với backfill-summaries — hai lệnh không được ghi kho/gọi model chồng nhau. */
+export const DAILY_SUMMARY_LOCK_KEY = "daily_summary_lock";
 // Stale rộng vì các group Zalo được giãn cách SUMMARY_GROUP_GAP_MINUTES —
 // một lần chạy nhiều group có thể kéo dài quá 30 phút.
 const LOCK_STALE_MS = 3 * 60 * 60 * 1000;
@@ -200,7 +201,7 @@ export async function runDailySummary(): Promise<void> {
   const dests = buildDestinations();
 
   // Chống 2 process chạy chồng (cron treo + chạy tay).
-  if (!acquireLock(LOCK_KEY, now, LOCK_STALE_MS)) {
+  if (!acquireLock(DAILY_SUMMARY_LOCK_KEY, now, LOCK_STALE_MS)) {
     console.log("[daily-summary] Đang có tiến trình daily-summary khác chạy — bỏ qua.");
     return;
   }
@@ -336,7 +337,7 @@ export async function runDailySummary(): Promise<void> {
     writeSendState(state);
     await sendParts(state, dests);
   } finally {
-    releaseLock(LOCK_KEY);
+    releaseLock(DAILY_SUMMARY_LOCK_KEY);
   }
 }
 
@@ -365,6 +366,12 @@ function backfillSummaryArchiveFromState(state: SummarySendState): void {
       `[daily-summary] Đã cứu bản tin ngày ${state.dayLabel} từ bot_state vào kho daily_summaries (backfill).`,
     );
   }
+}
+
+/** Cứu bản tin trong bot_state vào kho — backfill-summaries gọi trước khi bù quá khứ. */
+export function rescueSummaryStateToArchive(): void {
+  const prev = readSendState();
+  if (prev) backfillSummaryArchiveFromState(prev);
 }
 
 /** Heartbeat listener (bot_state.bot_health) cũ quá ngưỡng hoặc không có → true. */

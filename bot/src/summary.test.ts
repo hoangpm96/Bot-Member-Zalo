@@ -4,6 +4,7 @@ import {
   buildTranscript,
   composeSummaryMessages,
   dayWindowFromLabelVN,
+  dayWindowVNAt,
   isBotSummaryMessage,
   isoDateFromDayStartVN,
   previousDayWindowVN,
@@ -55,6 +56,16 @@ test("previousDayWindowVN: gần nửa đêm VN vẫn ra đúng ngày hôm trư�
   const now = Date.UTC(2026, 7, 11, 16, 59, 0);
   const w = previousDayWindowVN(now);
   assert.equal(w.label, "10/08/2026");
+});
+
+test("dayWindowVNAt: khung ngày chứa đúng mốc ts, cộng 24h ra ngày kế tiếp", () => {
+  // 2026-08-10 10:00 VN = 03:00Z
+  const ts = Date.UTC(2026, 7, 10, 3, 0, 0);
+  const w = dayWindowVNAt(ts);
+  assert.equal(w.label, "10/08/2026");
+  assert.ok(w.startTs <= ts && ts < w.endTs);
+  assert.equal(w.endTs - w.startTs, 24 * 60 * 60 * 1000);
+  assert.equal(dayWindowVNAt(w.endTs).label, "11/08/2026");
 });
 
 test("dayWindowFromLabelVN: round-trip với previousDayWindowVN", () => {

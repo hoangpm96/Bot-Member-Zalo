@@ -229,7 +229,8 @@ CREATE TABLE IF NOT EXISTS cleanup_warnings (
 -- Kho lưu VĨNH VIỄN bản tóm tắt hằng ngày (bot_state chỉ giữ bản mới nhất để
 -- resume gửi — bị ghi đè mỗi ngày). Dữ liệu này để sau tổng hợp/phân tích/viết blog.
 -- source: 'live' (ghi ngay lúc tạo bản tin) | 'state_backfill' (khôi phục từ bot_state cũ,
--- chỉ có parts đã compose nên các cột thống kê có thể NULL = không rõ).
+-- chỉ có parts đã compose nên các cột thống kê có thể NULL = không rõ)
+-- | 'backfill' (lệnh backfill-summaries tóm tắt lại ngày quá khứ từ group_messages).
 CREATE TABLE IF NOT EXISTS daily_summaries (
   id                 INTEGER PRIMARY KEY AUTOINCREMENT,
   day_date           TEXT NOT NULL,      -- 'YYYY-MM-DD' theo giờ VN (khoá nghiệp vụ, sort/filter được)

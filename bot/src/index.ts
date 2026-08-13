@@ -10,6 +10,7 @@ import { runSyncVotes } from "./commands/sync-votes.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
 import { runTelegramFindTopic, runTelegramForwardTest } from "./commands/telegram-forward.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
+import { runBackfillSummaries } from "./commands/backfill-summaries.js";
 import { recordBotError } from "./db/index.js";
 
 /**
@@ -43,6 +44,7 @@ Cách dùng:
   npm run monthly-cleanup   # mùng 3: lập danh sách/kick (DRY_RUN=1 chỉ in)
   npm run telegram-poll     # cron mỗi phút: duyệt/huỷ/retry/timeout qua Telegram
   npm run daily-summary     # cron 9:10 sáng: tóm tắt tin nhắn hôm qua (DeepSeek) → gửi các group/Telegram
+  npm run backfill-summaries # bù kho daily_summaries cho ngày quá khứ (--from/--to/--max-days, DRY_RUN=1 chỉ liệt kê)
 `;
 
 async function main(): Promise<void> {
@@ -93,6 +95,9 @@ async function main(): Promise<void> {
       break;
     case "daily-summary":
       await runDailySummarySafe();
+      break;
+    case "backfill-summaries":
+      await runBackfillSummaries();
       break;
     default:
       console.log(USAGE);

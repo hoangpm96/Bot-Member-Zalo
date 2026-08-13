@@ -74,15 +74,18 @@ export interface DayWindow {
   label: string;
 }
 
-/** Khung "ngày hôm qua" theo giờ VN, tính từ mốc `now` (epoch ms). */
-export function previousDayWindowVN(now: number): DayWindow {
+/** Khung ngày (giờ VN) CHỨA mốc `ts` — nền cho previousDayWindowVN và backfill duyệt từng ngày. */
+export function dayWindowVNAt(ts: number): DayWindow {
   const vnDayMs = 24 * 60 * 60 * 1000;
-  const todayStartVn = Math.floor((now + VN_UTC_OFFSET_MS) / vnDayMs) * vnDayMs;
-  const startTs = todayStartVn - vnDayMs - VN_UTC_OFFSET_MS;
-  const endTs = todayStartVn - VN_UTC_OFFSET_MS;
+  const startTs = Math.floor((ts + VN_UTC_OFFSET_MS) / vnDayMs) * vnDayMs - VN_UTC_OFFSET_MS;
   const d = new Date(startTs + VN_UTC_OFFSET_MS);
   const label = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
-  return { startTs, endTs, label };
+  return { startTs, endTs: startTs + vnDayMs, label };
+}
+
+/** Khung "ngày hôm qua" theo giờ VN, tính từ mốc `now` (epoch ms). */
+export function previousDayWindowVN(now: number): DayWindow {
+  return dayWindowVNAt(now - 24 * 60 * 60 * 1000);
 }
 
 /** 'YYYY-MM-DD' (giờ VN) từ epoch ms 00:00 VN — cột day_date của daily_summaries. */

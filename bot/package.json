@@ -25,6 +25,7 @@
     "monthly-cleanup": "tsx src/index.ts monthly-cleanup",
     "telegram-poll": "tsx src/index.ts telegram-poll",
     "daily-summary": "tsx src/index.ts daily-summary",
+    "backfill-summaries": "tsx src/index.ts backfill-summaries",
     "install-cron": "bash scripts/install-cron.sh",
     "setup-vps": "bash scripts/setup-vps.sh",
     "validate-env": "bash scripts/validate-env.sh",

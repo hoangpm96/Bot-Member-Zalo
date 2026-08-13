@@ -455,7 +455,7 @@ export interface DailySummaryInput {
   topSenders?: string[];
   model?: string;
   transcriptChars?: number | null;
-  source?: "live" | "state_backfill";
+  source?: "live" | "state_backfill" | "backfill";
   now: number;
 }
 
@@ -526,6 +526,24 @@ export function backfillDailySummaryIfMissing(input: DailySummaryInput): boolean
     .prepare(`INSERT OR IGNORE ${DAILY_SUMMARY_INSERT_SQL}`)
     .run(dailySummaryParams({ ...input, source: input.source ?? "state_backfill" }));
   return res.changes > 0;
+}
+
+/** Ngày ('YYYY-MM-DD') đã có trong kho chưa — backfill check trước khi tốn tiền gọi model. */
+export function hasDailySummaryForDate(dayDate: string): boolean {
+  const row = getDb()
+    .prepare(`SELECT 1 AS ok FROM daily_summaries WHERE day_date = @dayDate`)
+    .get({ dayDate }) as { ok: number } | undefined;
+  return row !== undefined;
+}
+
+/** Mốc ts của tin nhắn thành viên đầu tiên trong kho — điểm bắt đầu quét backfill. */
+export function getEarliestGroupMessageTs(threadId: string): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT MIN(ts) AS t FROM group_messages WHERE thread_id = @threadId AND is_self = 0`,
+    )
+    .get({ threadId }) as { t: number | null };
+  return row.t ?? null;
 }
 
 // ---- Reads cho ranking / export ----
