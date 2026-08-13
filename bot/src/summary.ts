@@ -48,10 +48,11 @@ export function summaryTargetChars(maxParts: number): number {
  * Nếu max_tokens chỉ vừa đủ phần trả lời thì reasoning ăn hết ngân sách →
  * content rỗng với finish_reason "length" (HTTP vẫn 200) — sự cố 13/08/2026.
  * Ngân sách này cộng thêm cho phần suy nghĩ, rộng rãi tới mức không bao giờ
- * chạm (reasoning tóm tắt thực tế chỉ vài nghìn token); max_tokens vẫn giữ
- * làm phanh chi phí cho ca model sinh lặp vô hạn.
+ * chạm — đo thật 13/08/2026: transcript 32K ký tự chỉ reasoning 4.7K token,
+ * tức dư >12 lần; max_tokens là trần chứ không phải chi phí cố định, chỉ giữ
+ * làm phanh cho ca model sinh lặp vô hạn.
  */
-const REASONING_TOKENS_BUDGET = 30_000;
+const REASONING_TOKENS_BUDGET = 60_000;
 
 function summaryMaxTokens(maxParts: number): number {
   // Tiếng Việt ~2-3 ký tự/token nên hệ số 0.6 đủ dư cho phần trả lời.
@@ -294,17 +295,19 @@ export async function summarizeWithDeepSeek(input: {
       const content = choice?.message?.content?.trim();
       if (!content) {
         // finish_reason "length" + reasoning_tokens cao = reasoning ăn hết max_tokens.
+        // Đáng retry: temperature >0 nên nhịp sau có thể suy nghĩ ngắn hơn, và
+        // content rỗng cũng có thể là trục trặc nhất thời phía API.
         throw new Error(
-          "DeepSeek trả response không có nội dung tóm tắt " +
+          "Response DeepSeek không có nội dung tóm tắt " +
             `(finish_reason=${choice?.finish_reason ?? "?"}, ` +
             `reasoning_tokens=${data.usage?.completion_tokens_details?.reasoning_tokens ?? "?"}).`,
         );
       }
       return content;
     } catch (e) {
-      // Lỗi mạng/timeout (fetch throw) cũng đáng retry; lỗi đã throw chủ đích ở trên
-      // (4xx không retry / hết nội dung) thì ném tiếp luôn.
-      if (e instanceof Error && e.message.startsWith("DeepSeek trả")) throw e;
+      // Lỗi mạng/timeout (fetch throw) và content rỗng đều đáng retry; riêng lỗi
+      // HTTP 4xx đã lọc ở trên là lỗi cấu hình — ném tiếp luôn, retry vô ích.
+      if (e instanceof Error && e.message.startsWith("DeepSeek trả HTTP")) throw e;
       lastError = e;
       if (attempt < MAX_ATTEMPTS) {
         console.warn(`[summary] Gọi DeepSeek lỗi (${String(e)}) — retry lần ${attempt}/${MAX_ATTEMPTS - 1}...`);
