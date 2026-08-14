@@ -4,6 +4,7 @@ import {
   getEarliestGroupMessageTs,
   getPublicPostByDate,
   listGroupMessagesBetween,
+  listMemberDisplayNames,
   recordBotError,
   releaseLock,
   savePublicPost,
@@ -16,7 +17,7 @@ import {
   isoDateFromDayStartVN,
   type DayWindow,
 } from "../summary.js";
-import { draftPublicPost } from "../fb-post.js";
+import { draftPublicPost, scrubMemberNames } from "../fb-post.js";
 import {
   FB_POST_LOCK_KEY,
   parseTopics,
@@ -174,7 +175,13 @@ export async function runBackfillFbPosts(): Promise<void> {
     let skippedEmpty = 0;
     let planned = 0;
     const failedDays: string[] = [];
+    /** Ngày model lỡ nêu tên thành viên và đã bị chốt chặn sửa lại. */
+    const scrubbedDays: string[] = [];
     let processedBefore = false;
+
+    // Đọc danh bạ MỘT LẦN cho cả vòng lặp: 1.000+ dòng, không việc gì phải hỏi
+    // DB lại cho từng ngày.
+    const memberNames = listMemberDisplayNames();
 
     for (const day of days) {
       if (saved + skippedNoContent + planned >= args.maxDays) {
@@ -244,7 +251,12 @@ export async function runBackfillFbPosts(): Promise<void> {
           `[backfill-fb-posts] ${day.label}: ${transcript.totalMessages} tin / ${transcript.uniqueSenders} người ` +
             `(${transcript.text.length} ký tự) — gọi DeepSeek (${config.deepseekModel})...`,
         );
-        const post = await draftPublicPost(transcript.text, day.label);
+        const draft = await draftPublicPost(transcript.text, day.label);
+        const scrub = await scrubMemberNames(draft, memberNames);
+        const post = scrub.post;
+        if (scrub.leaked.length > 0) {
+          scrubbedDays.push(`${day.label} (${scrub.leaked.join(", ")})`);
+        }
 
         if (post.topics.length === 0) {
           const reason = post.skip_reason || "Không có chủ đề nào đủ giá trị.";
@@ -314,6 +326,12 @@ export async function runBackfillFbPosts(): Promise<void> {
         `${skippedNoContent} ngày không đủ nội dung, ${skippedExisting} đã có sẵn, ${skippedEmpty} không có tin nhắn` +
         (failedDays.length > 0 ? `, LỖI ${failedDays.length} ngày: ${failedDays.join(", ")}.` : "."),
     );
+    if (scrubbedDays.length > 0) {
+      console.warn(
+        `[backfill-fb-posts] ${scrubbedDays.length} ngày bị model nêu tên thành viên và đã được sửa: ` +
+          scrubbedDays.join("; "),
+      );
+    }
     if (failedDays.length > 0) process.exitCode = 1;
   } finally {
     releaseLock(FB_POST_LOCK_KEY);

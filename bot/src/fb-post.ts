@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { config } from "./config.js";
+import { buildNamePatterns, findLeakedNames, maskNames } from "./name-scrub.js";
 
 /**
  * Thư viện soạn + đăng bản tin Facebook Page (brainstorm
@@ -154,33 +155,11 @@ export async function draftPublicPost(transcript: string, dayLabel: string): Pro
     "cards showing related shapes — a scene with layers, not a single lonely object. " +
     "CHỈ tả cảnh và bố cục, KHÔNG tả style/màu sắc/chữ (hệ thống tự gắn style).";
 
-  const resp = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    signal: AbortSignal.timeout(600_000),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.deepseekApiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.deepseekModel,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: `Soạn bài đăng từ log ngày ${dayLabel}:\n<log>\n${transcript}\n</log>` },
-      ],
-      temperature: 0.4,
-      max_tokens: 6000,
-      response_format: { type: "json_object" },
-      // v4-flash mặc định reasoning — tắt kẻo reasoning ăn hết max_tokens, content rỗng.
-      thinking: { type: "disabled" },
-      stream: false,
-    }),
-  });
-  if (!resp.ok) {
-    throw new Error(`DeepSeek HTTP ${resp.status}: ${(await resp.text()).slice(0, 500)}`);
-  }
-  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("Response DeepSeek không có nội dung bài đăng");
+  const content = await callDeepSeekJson(
+    system,
+    `Soạn bài đăng từ log ngày ${dayLabel}:\n<log>\n${transcript}\n</log>`,
+    6000,
+  );
   const parsed = JSON.parse(content) as PublicPost;
   if (!Array.isArray(parsed.topics)) {
     throw new Error(`JSON DeepSeek thiếu mảng topics: ${content.slice(0, 300)}`);
@@ -200,6 +179,132 @@ export async function draftPublicPost(transcript: string, dayLabel: string): Pro
     main_caption: topics.length > 0 ? parsed.main_caption.trim() : "",
     topics,
     skip_reason: topics.length === 0 ? parsed.skip_reason?.trim() || "Không có chủ đề nào đủ giá trị." : undefined,
+  };
+}
+
+/** Gọi DeepSeek trả JSON object, dùng chung cho soạn bài và viết lại. */
+async function callDeepSeekJson(system: string, user: string, maxTokens: number): Promise<string> {
+  const resp = await fetch("https://api.deepseek.com/chat/completions", {
+    method: "POST",
+    signal: AbortSignal.timeout(600_000),
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.deepseekApiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.deepseekModel,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.4,
+      max_tokens: maxTokens,
+      response_format: { type: "json_object" },
+      // v4-flash mặc định reasoning — tắt kẻo reasoning ăn hết max_tokens, content rỗng.
+      thinking: { type: "disabled" },
+      stream: false,
+    }),
+  });
+  if (!resp.ok) {
+    throw new Error(`DeepSeek HTTP ${resp.status}: ${(await resp.text()).slice(0, 500)}`);
+  }
+  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
+  const content = data.choices?.[0]?.message?.content?.trim();
+  if (!content) throw new Error("Response DeepSeek không có nội dung");
+  return content;
+}
+
+export interface ScrubResult {
+  post: PublicPost;
+  /** Tên thành viên bị model nêu ra trong bản nháp đầu. Rỗng = bài sạch. */
+  leaked: string[];
+  /** true khi phải thay cứng vì viết lại vẫn còn tên — câu văn có thể hơi gượng. */
+  maskedHard: boolean;
+}
+
+/** Gom toàn bộ chữ của một bài để dò tên một lượt. */
+function postText(post: PublicPost): string {
+  return [post.main_caption, ...post.topics.flatMap((t) => [t.title, t.caption])].join("\n");
+}
+
+/**
+ * Chốt chặn tên riêng cho bản public: dò tên thành viên trong bài, dính thì bảo
+ * model viết lại bằng cách gọi chung chung, viết lại vẫn dính thì thay cứng.
+ *
+ * Prompt đã cấm nêu tên nhưng model có ngày lỡ tay, mà bài này đăng Facebook và
+ * lên bahub.vn — chỗ đó không có nút hoàn tác thật sự.
+ */
+export async function scrubMemberNames(
+  post: PublicPost,
+  memberNames: string[],
+): Promise<ScrubResult> {
+  if (post.topics.length === 0) return { post, leaked: [], maskedHard: false };
+
+  const patterns = buildNamePatterns(memberNames);
+  const leaked = findLeakedNames(postText(post), patterns);
+  if (leaked.length === 0) return { post, leaked: [], maskedHard: false };
+
+  console.warn(`[fb-post] Bản nháp có nêu tên thành viên: ${leaked.join(", ")} — bảo model viết lại.`);
+
+  let rewritten: PublicPost | null = null;
+  try {
+    const system =
+      "Bạn biên tập lại một bài đăng công khai đã soạn sẵn. Bài lỡ nêu tên riêng của thành viên trong " +
+      "một nhóm chat kín — đây là lỗi phải sửa. Nhiệm vụ DUY NHẤT: thay mọi cách nhắc tên riêng bằng " +
+      "cách gọi chung chung tự nhiên ('một bạn trong nhóm', 'một anh trong nhóm', 'một chị', 'bạn A', " +
+      "'người hỏi', 'cao nhân nào đó'); nếu trong một đoạn có nhiều người khác nhau thì phân biệt bằng " +
+      "'bạn A', 'bạn B' cho người đọc còn theo được. " +
+      "GIỮ NGUYÊN mọi thứ còn lại: nội dung, số liệu, thứ tự chủ đề, giọng văn, emoji, cách xuống dòng, " +
+      "hashtag, độ dài. KHÔNG viết lại cho hay hơn, KHÔNG thêm bớt ý. " +
+      "Trả về DUY NHẤT JSON đúng schema đã cho: " +
+      '{"main_caption": string, "topics": [{"title": string, "caption": string}]} — ' +
+      "đúng số chủ đề và đúng thứ tự như bản gốc.";
+
+    const payload = {
+      main_caption: post.main_caption,
+      topics: post.topics.map((t) => ({ title: t.title, caption: t.caption })),
+    };
+    const user =
+      `Tên riêng cần thay hết: ${leaked.join(", ")}.\n\nBài cần sửa:\n${JSON.stringify(payload)}`;
+    const parsed = JSON.parse(await callDeepSeekJson(system, user, 6000)) as {
+      main_caption?: string;
+      topics?: { title?: string; caption?: string }[];
+    };
+
+    // Model trả thiếu/lệch số chủ đề thì bỏ bản viết lại, đi thẳng xuống thay
+    // cứng — ghép nửa vời vào bài gốc còn nguy hiểm hơn.
+    if (parsed.main_caption && parsed.topics?.length === post.topics.length) {
+      rewritten = {
+        main_caption: parsed.main_caption,
+        topics: post.topics.map((topic, i) => ({
+          ...topic,
+          title: parsed.topics![i]?.title?.trim() || topic.title,
+          caption: parsed.topics![i]?.caption?.trim() || topic.caption,
+        })),
+      };
+    } else {
+      console.warn("[fb-post] Bản viết lại sai cấu trúc — dùng cách thay cứng.");
+    }
+  } catch (e) {
+    console.warn(`[fb-post] Gọi viết lại thất bại (${String(e).slice(0, 200)}) — dùng cách thay cứng.`);
+  }
+
+  const candidate = rewritten ?? post;
+  const stillLeaked = findLeakedNames(postText(candidate), patterns);
+  if (stillLeaked.length === 0) return { post: candidate, leaked, maskedHard: false };
+
+  console.warn(`[fb-post] Viết lại vẫn còn tên (${stillLeaked.join(", ")}) — thay cứng.`);
+  return {
+    post: {
+      main_caption: maskNames(candidate.main_caption, stillLeaked),
+      topics: candidate.topics.map((topic) => ({
+        ...topic,
+        title: maskNames(topic.title, stillLeaked),
+        caption: maskNames(topic.caption, stillLeaked),
+      })),
+    },
+    leaked,
+    maskedHard: true,
   };
 }
 

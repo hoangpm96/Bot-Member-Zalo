@@ -7,6 +7,7 @@ import {
   getBotState,
   getPublicPostByDate,
   listGroupMessagesBetween,
+  listMemberDisplayNames,
   recordBotError,
   releaseLock,
   savePublicPost,
@@ -28,6 +29,7 @@ import {
   generateTopicImage,
   postMultiPhoto,
   publishTopicImage,
+  scrubMemberNames,
 } from "../fb-post.js";
 
 /** Key bot_state của bản cũ (trước khi có bảng daily_public_posts) — chỉ còn dùng để cứu 1 lần. */
@@ -250,6 +252,21 @@ export async function runDailyFbPost(): Promise<void> {
           `Gọi DeepSeek (${config.deepseekModel})...`,
       );
       post = await draftPublicPost(transcript.text, window.label);
+
+      // Chốt chặn tên riêng chỉ chạy trên bản VỪA SOẠN. Bản lấy lại từ kho đã
+      // qua bước này rồi, quét lại chỉ tốn thêm một lần gọi model.
+      const scrub = await scrubMemberNames(post, listMemberDisplayNames());
+      post = scrub.post;
+      if (scrub.leaked.length > 0) {
+        const how = scrub.maskedHard ? "viết lại vẫn còn nên em thay cứng" : "đã cho viết lại";
+        console.warn(`[daily-fb-post] Bản nháp nêu tên: ${scrub.leaked.join(", ")} — ${how}.`);
+        if (!config.dryRun) {
+          await notifyTelegramBestEffort(
+            `⚠️ Bản tin ${window.label} lỡ nhắc tên thành viên (${scrub.leaked.join(", ")}) — ${how}. ` +
+              "Anh liếc lại bài trước khi share nhé.",
+          );
+        }
+      }
     }
 
     // Ngày không có gì đáng chia sẻ ra ngoài: ghi nhận rồi dừng — thà im lặng

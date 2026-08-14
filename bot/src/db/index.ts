@@ -668,6 +668,20 @@ export function listPublicPostsForSync(
     .all({ updatedAt: cursor.updatedAt, dayDate: cursor.dayDate, limit }) as PublicPostRow[];
 }
 
+/**
+ * Tên hiển thị của MỌI thành viên từng thấy trong group, kể cả người đã rời.
+ *
+ * Dùng để dò tên lọt vào bản tin công khai. Lấy cả người đã rời là cố ý: họ
+ * vẫn xuất hiện trong tin nhắn của ngày đang tóm tắt, và rời nhóm không có
+ * nghĩa là đồng ý cho nêu tên lên Facebook.
+ */
+export function listMemberDisplayNames(): string[] {
+  const rows = getDb()
+    .prepare(`SELECT DISTINCT display_name FROM members WHERE trim(display_name) <> ''`)
+    .all() as { display_name: string }[];
+  return rows.map((row) => row.display_name);
+}
+
 /** Ngày đã có bản tin công khai chưa — backfill check trước khi tốn tiền gọi model/sinh ảnh. */
 export function hasPublicPostForDate(dayDate: string): boolean {
   const row = getDb()
