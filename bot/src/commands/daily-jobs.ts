@@ -12,7 +12,7 @@ import {
   type JobRawRow,
 } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
-import { collectRawJobs, collectTelegramRaw } from "../jobs/collect.js";
+import { collectRawJobs } from "../jobs/collect.js";
 import { jobFingerprint, mergeSources, normalizeLocation, parseSources } from "../jobs/dedupe.js";
 import { extractJob, type ExtractedJob } from "../jobs/extract.js";
 
@@ -45,7 +45,7 @@ export interface DailyJobsReport {
 function anySourceConfigured(): boolean {
   return Boolean(
     config.jobFbGroupSlug ||
-      (config.jobTelegramBotToken && config.jobTelegramChatId) ||
+      config.jobTelegramGroupSlug ||
       (config.jobZaloEnabled && config.groupId),
   );
 }
@@ -151,7 +151,7 @@ async function processRaw(
 
 export async function runDailyJobs(): Promise<DailyJobsReport | null> {
   if (!anySourceConfigured()) {
-    console.log("[daily-jobs] Chưa cấu hình nguồn nào (JOB_FB_GROUP_SLUG/JOB_TELEGRAM_*) — bỏ qua.");
+    console.log("[daily-jobs] Chưa cấu hình nguồn nào (JOB_FB_GROUP_SLUG/JOB_TELEGRAM_GROUP_SLUG) — bỏ qua.");
     return null;
   }
   if (!config.deepseekApiKey) {
@@ -268,25 +268,3 @@ export async function runDailyJobsSafe(): Promise<void> {
   }
 }
 
-/**
- * Cron dày (gợi ý 5 phút): chỉ hút tin Telegram về job_raw, KHÔNG gọi AI.
- *
- * Cần tách khỏi daily-jobs vì Telegram chỉ giữ update chưa đọc trong 24 giờ —
- * mỗi ngày mới lấy một lần là đúng bằng hạn, hụt một nhịp là mất tin thật. Đây
- * là bước rẻ: một request HTTP, không tốn tiền model.
- */
-export async function runJobTelegramPoll(): Promise<void> {
-  if (!config.jobTelegramBotToken || !config.jobTelegramChatId) return;
-
-  try {
-    const saved = await collectTelegramRaw(Date.now());
-    if (saved > 0) console.log(`[job-telegram-poll] Đã lưu ${saved} mẩu mới từ Telegram.`);
-  } catch (e) {
-    recordBotError({
-      source: "job-telegram-poll",
-      code: "telegram_poll_failed",
-      message: String(e),
-    });
-    throw e;
-  }
-}

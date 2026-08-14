@@ -192,13 +192,20 @@ export const config = {
     process.env.JOB_FB_USER_AGENT?.trim() ||
     "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
 
-  /** Bot Telegram RIÊNG cho luồng tin tuyển dụng. Rỗng = tắt nguồn Telegram. */
-  jobTelegramBotToken: process.env.JOB_TELEGRAM_BOT_TOKEN?.trim() || "",
+  /**
+   * Username group Telegram CÔNG KHAI chứa tin tuyển dụng (phần sau t.me/).
+   * Rỗng = tắt nguồn Telegram.
+   *
+   * Đọc qua Post Widget công khai, KHÔNG dùng bot: `getUpdates` không đọc được
+   * lịch sử và chỉ giữ update chưa đọc 24 giờ.
+   */
+  jobTelegramGroupSlug: process.env.JOB_TELEGRAM_GROUP_SLUG?.trim() || "",
 
-  /** Chat/supergroup Telegram chứa tin tuyển dụng (vd -100...). */
-  jobTelegramChatId: process.env.JOB_TELEGRAM_CHAT_ID?.trim() || "",
-
-  /** message_thread_id của topic tuyển dụng trong forum group. Trống = nghe cả group. */
+  /**
+   * Id topic tuyển dụng trong forum group (số cuối trong link topic).
+   * Trống = lấy mọi topic — CẨN THẬN: group có thể có topic mirror Zalo, lấy
+   * hết sẽ trùng với nguồn Zalo.
+   */
   jobTelegramTopicId: readOptionalPositiveInt("JOB_TELEGRAM_TOPIC_ID"),
 
   /** Lấy tin tuyển dụng từ group Zalo chính (GROUP_ID). 0 = tắt nguồn Zalo. */

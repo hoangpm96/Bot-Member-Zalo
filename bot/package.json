@@ -31,7 +31,7 @@
     "backfill-summaries": "tsx src/index.ts backfill-summaries",
     "backfill-fb-posts": "tsx src/index.ts backfill-fb-posts",
     "daily-jobs": "tsx src/index.ts daily-jobs",
-    "job-telegram-poll": "tsx src/index.ts job-telegram-poll",
+    "backfill-telegram-jobs": "tsx src/index.ts backfill-telegram-jobs",
     "sync-jobs": "tsx src/index.ts sync-jobs",
     "install-cron": "bash scripts/install-cron.sh",
     "setup-vps": "bash scripts/setup-vps.sh",

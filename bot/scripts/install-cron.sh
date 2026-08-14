@@ -73,11 +73,6 @@ CRON_TZ=Asia/Ho_Chi_Minh
 # Incremental (cursor in bot_state); needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.
 40 9-23 * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-posts >> "$LOG_DIR/sync-posts.log" 2>&1
 
-# Job board intake from Telegram. Telegram only keeps unread getUpdates for 24h, so this must run
-# often -- once a day would sit exactly on the expiry edge and lose real posts. Cheap: one HTTP
-# call, no model spend. No-op unless JOB_TELEGRAM_* are set.
-*/5 * * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" job-telegram-poll >> "$LOG_DIR/job-telegram-poll.log" 2>&1
-
 # Daily job board. Pulls the public Facebook group + Telegram topic + Zalo group, runs DeepSeek to
 # filter and extract fields, dedupes, expires old ads. Source for bahub.vn/tuyen-dung, so it runs
 # before sync-jobs. No-op unless at least one JOB_* source is configured.

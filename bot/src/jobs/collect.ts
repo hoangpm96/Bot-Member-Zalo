@@ -1,13 +1,14 @@
 import { config } from "../config.js";
 import {
+  getBotState,
   getLatestJobRawPostedAt,
   listGroupMessagesBetween,
   saveJobRawBatch,
   setBotState,
 } from "../db/index.js";
-import { pollTelegramInbox } from "../telegram.js";
 import { clusterMessages, type ClusterableMessage } from "./cluster.js";
 import { fetchFbGroupJobs } from "./fb-group-source.js";
+import { crawlRange, findIdAtTime, findLatestId } from "./telegram-crawl.js";
 import { prefilterJobItems } from "./prefilter.js";
 import type { RawJobItem } from "./types.js";
 
@@ -15,12 +16,12 @@ import type { RawJobItem } from "./types.js";
  * Thu gom nội dung thô từ cả ba nguồn về bảng job_raw.
  *
  * Mỗi nguồn tự chịu trách nhiệm phần "lấy tới đâu rồi": Facebook và Zalo đi
- * theo mốc bài mới nhất đã lưu, Telegram đi theo con trỏ offset của getUpdates.
+ * theo mốc bài mới nhất đã lưu, Telegram đi theo message id lớn nhất đã duyệt.
  * Nguồn nào lỗi thì các nguồn còn lại vẫn chạy — mất Facebook một hôm không
  * đáng để mất luôn tin Zalo hôm đó.
  */
 
-export const TELEGRAM_OFFSET_KEY = "job_telegram_offset";
+export const TELEGRAM_LAST_ID_KEY = "job_telegram_last_id";
 
 export interface CollectResult {
   bySource: Record<string, number>;
@@ -39,41 +40,39 @@ async function collectFacebook(now: number): Promise<RawJobItem[]> {
   return fetchFbGroupJobs(sinceFor("facebook", now));
 }
 
-async function collectTelegram(): Promise<{ items: RawJobItem[]; commitOffset: () => void }> {
-  if (!config.jobTelegramBotToken || !config.jobTelegramChatId) {
-    return { items: [], commitOffset: () => {} };
+/**
+ * Đọc tin mới của group Telegram công khai kể từ id đã duyệt lần trước.
+ *
+ * Lần đầu chưa có con trỏ thì lùi lại JOB_LOOKBACK_DAYS. Muốn lấy xa hơn thì
+ * dùng lệnh `backfill-telegram-jobs`.
+ */
+async function collectTelegram(
+  now: number,
+): Promise<{ items: RawJobItem[]; lastId: number | null }> {
+  const slug = config.jobTelegramGroupSlug;
+  if (!slug) return { items: [], lastId: null };
+
+  const saved = getBotState(TELEGRAM_LAST_ID_KEY);
+  let fromId = saved ? Number(saved) + 1 : 0;
+
+  if (!Number.isSafeInteger(fromId) || fromId <= 0) {
+    const since = now - config.jobLookbackDays * 24 * 60 * 60 * 1000;
+    const latest = await findLatestId(slug, 1);
+    fromId = await findIdAtTime(slug, since, { low: 1, high: latest });
   }
 
-  const { messages, nextOffset } = await pollTelegramInbox({
-    botToken: config.jobTelegramBotToken,
-    chatId: config.jobTelegramChatId,
+  const toId = await findLatestId(slug, fromId - 1);
+  if (toId < fromId) return { items: [], lastId: null };
+
+  const result = await crawlRange({
+    groupSlug: slug,
+    fromId,
+    toId,
     topicId: config.jobTelegramTopicId,
-    offsetKey: TELEGRAM_OFFSET_KEY,
   });
 
-  const clusterable: ClusterableMessage[] = messages.map((m) => ({
-    senderId: m.senderId,
-    author: m.senderName,
-    messageId: String(m.messageId),
-    text: m.text,
-    ts: m.ts,
-    // Link tới đúng tin trong supergroup công khai. Chat id dạng -100xxxx nên
-    // phải bỏ tiền tố -100 mới ra id dùng được trong đường dẫn t.me/c/.
-    url: telegramMessageUrl(config.jobTelegramChatId, m.messageId),
-  }));
-
-  return {
-    items: clusterMessages(clusterable, "telegram", config.jobClusterGapMinutes * 60_000),
-    commitOffset: () => {
-      if (nextOffset !== null) setBotState(TELEGRAM_OFFSET_KEY, String(nextOffset), Date.now());
-    },
-  };
-}
-
-export function telegramMessageUrl(chatId: string, messageId: number): string | null {
-  const internal = /^-100(\d+)$/.exec(chatId);
-  if (!internal) return null;
-  return `https://t.me/c/${internal[1]}/${messageId}`;
+  // Trả id ra ngoài chứ không tự ghi: con trỏ chỉ được nhích SAU khi tin đã vào DB.
+  return { items: result.items, lastId: result.lastId };
 }
 
 function collectZalo(now: number): RawJobItem[] {
@@ -113,18 +112,6 @@ function saveItems(rawItems: RawJobItem[], now: number): number {
   );
 }
 
-/**
- * Chỉ hút Telegram về job_raw. Tách riêng để chạy được ở nhịp dày (5 phút) mà
- * không kéo theo lần gọi Facebook — Telegram chỉ giữ update 24 giờ nên không
- * chờ được tới lần chạy hằng ngày.
- */
-export async function collectTelegramRaw(now: number): Promise<number> {
-  const { items, commitOffset } = await collectTelegram();
-  const saved = saveItems(items, now);
-  commitOffset();
-  return saved;
-}
-
 /** Lấy về và lưu vào job_raw. Trả về số mẩu MỚI theo từng nguồn. */
 export async function collectRawJobs(now: number): Promise<CollectResult> {
   const bySource: Record<string, number> = { facebook: 0, telegram: 0, zalo: 0 };
@@ -139,7 +126,12 @@ export async function collectRawJobs(now: number): Promise<CollectResult> {
   }
 
   try {
-    bySource.telegram = await collectTelegramRaw(now);
+    const telegram = await collectTelegram(now);
+    bySource.telegram = saveItems(telegram.items, now);
+    // Con trỏ chỉ nhích khi đã ghi DB xong — ghi lỗi thì lần sau duyệt lại.
+    if (telegram.lastId !== null) {
+      setBotState(TELEGRAM_LAST_ID_KEY, String(telegram.lastId), Date.now());
+    }
   } catch (e) {
     errors.push({ source: "telegram", message: String(e) });
   }

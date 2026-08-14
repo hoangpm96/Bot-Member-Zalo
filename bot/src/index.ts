@@ -15,7 +15,8 @@ import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { runDailyFbPostSafe } from "./commands/daily-fb-post.js";
 import { runBackfillSummaries } from "./commands/backfill-summaries.js";
 import { runBackfillFbPosts } from "./commands/backfill-fb-posts.js";
-import { runDailyJobsSafe, runJobTelegramPoll } from "./commands/daily-jobs.js";
+import { runDailyJobsSafe } from "./commands/daily-jobs.js";
+import { runBackfillTelegramJobs } from "./commands/backfill-telegram-jobs.js";
 import { runSyncJobs } from "./commands/sync-jobs.js";
 import { recordBotError } from "./db/index.js";
 
@@ -56,7 +57,7 @@ Cách dùng:
   npm run backfill-summaries # bù kho daily_summaries cho ngày quá khứ (--from/--to/--max-days, DRY_RUN=1 chỉ liệt kê)
   npm run backfill-fb-posts # bù kho bản tin công khai cho ngày quá khứ (--from/--to/--day/--max-days/--force/--no-images)
   npm run daily-jobs        # cron 7:30 sáng: gom tin tuyển dụng 3 nguồn → AI bóc tách → kho job_posts
-  npm run job-telegram-poll # cron mỗi 5 phút: hút tin tuyển dụng từ Telegram (update chỉ sống 24h)
+  npm run backfill-telegram-jobs -- --days=30  # bù tin tuyển dụng Telegram cho N ngày quá khứ
   npm run sync-jobs         # cron: đẩy kho tin tuyển dụng lên Supabase → hiện ở bahub.vn/tuyen-dung (--full: đẩy lại hết)
 `;
 
@@ -127,8 +128,8 @@ async function main(): Promise<void> {
     case "daily-jobs":
       await runDailyJobsSafe();
       break;
-    case "job-telegram-poll":
-      await runJobTelegramPoll();
+    case "backfill-telegram-jobs":
+      await runBackfillTelegramJobs(process.argv.slice(3));
       break;
     case "sync-jobs":
       await runSyncJobs(process.argv.slice(3));
