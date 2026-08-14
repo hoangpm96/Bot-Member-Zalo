@@ -32,6 +32,12 @@ export interface ExtractedJob {
   deadline: string;
   contact: string;
   summary: string;
+  /**
+   * Bản viết lại gọn gàng, bỏ tán gẫu — dùng cho nguồn Zalo/Telegram, nơi nội
+   * dung gốc là chat nhóm kín chứ không phải một bài đăng tuyển. Bài Facebook
+   * vẫn hiển thị NGUYÊN VĂN vì đó là bài công khai và có link về bản gốc.
+   */
+  clean_description: string;
   risk_level: "ok" | "suspect";
   risk_reason: string;
 }
@@ -44,11 +50,25 @@ const SYSTEM_PROMPT =
   "Người dùng đưa MỘT mẩu nội dung lấy từ group nghề nghiệp, đặt giữa <noi_dung> và </noi_dung>. " +
   "Nhiệm vụ: xác định đây có phải TIN TUYỂN DỤNG do bên tuyển đăng hay không, nếu phải thì bóc thông tin ra JSON.\n" +
   "\n" +
-  "LÀ tin tuyển dụng khi: người đăng đang tìm người vào làm (kể cả viết rất ngắn, kiểu " +
-  "'[Cầu Giấy, HN] tìm BA min 4 exp, upto 35M, ib em'), hoặc HR/headhunter giới thiệu vị trí đang mở.\n" +
-  "KHÔNG phải tin tuyển dụng: ứng viên tự giới thiệu tìm việc, hỏi đáp nghề nghiệp, chia sẻ kiến thức, " +
-  "quảng cáo khoá học / mentor / dịch vụ viết CV, tuyển cộng tác viên bán hàng đa cấp, thông báo nội bộ, " +
-  "chào hỏi, bình luận. Tin không rõ ràng thì trả is_job=false — thà bỏ sót còn hơn đăng rác.\n" +
+  "LÀ tin tuyển dụng khi CẢ HAI điều sau cùng đúng:\n" +
+  "  (a) người đăng đang TRỰC TIẾP tìm người cho một vị trí đang mở — tự tuyển, HR, headhunter, " +
+  "hoặc giới thiệu hộ một vị trí cụ thể; VÀ\n" +
+  "  (b) người đọc CÓ THỂ HÀNH ĐỘNG NGAY — bài nêu cách liên hệ, hoặc tên công ty, hoặc một lời mời " +
+  "liên hệ rõ ràng ('ib em', 'inbox mình', 'gửi CV về...', 'ai quan tâm nhắn nhé', 'ping em').\n" +
+  "Thiếu một trong hai thì is_job=false, kể cả khi bài có nêu vị trí và mức lương.\n" +
+  "\n" +
+  "KHÔNG phải tin tuyển dụng (đây là chỗ hay nhầm nhất, đọc kỹ):\n" +
+  "  - CHIA SẺ/BÌNH LUẬN VỀ THỊ TRƯỜNG, mức lương, cơ hội chung chung — người đăng chỉ đang kể " +
+  "cho vui hoặc nhận xét, không phải đang tuyển. Ví dụ phải loại: 'có mấy quả IT BA cho trường đại học " +
+  "được làm remote, rate cao kinh khủng, 90k-110k CAD/năm' — nêu vị trí và lương nhưng KHÔNG tuyển ai, " +
+  "không có cách liên hệ, không có công ty. Loại.\n" +
+  "  - Kể chuyện đi phỏng vấn, review công ty, so sánh mức lương, than thở về nghề.\n" +
+  "  - Ứng viên tự giới thiệu tìm việc.\n" +
+  "  - Hỏi đáp nghề nghiệp, chia sẻ kiến thức, xin tài liệu.\n" +
+  "  - Quảng cáo khoá học / mentor / dịch vụ viết CV, tuyển cộng tác viên bán hàng đa cấp.\n" +
+  "  - Thông báo nội bộ, chào hỏi, đùa vui, bình luận rời rạc.\n" +
+  "Không chắc thì trả is_job=false. Thà bỏ sót một tin thật còn hơn đăng một mẩu chat lên trang " +
+  "tuyển dụng công khai — bỏ sót thì không ai biết, đăng nhầm thì mất uy tín.\n" +
   "\n" +
   "BÓC THÔNG TIN — luật cứng:\n" +
   "- CHỈ lấy thông tin CÓ THẬT trong nội dung. TUYỆT ĐỐI không suy đoán, không bịa, không suy ra từ " +
@@ -69,6 +89,10 @@ const SYSTEM_PROMPT =
   "Ghi lại đúng nguyên văn, nhiều cách thì nối bằng ' · '. Bài chỉ nói 'ib em', 'inbox mình' thì điền 'N/A' " +
   "(người đọc sẽ bấm vào link bài gốc). TUYỆT ĐỐI KHÔNG lấy số CMND/CCCD/mã số thuế nếu lỡ có trong bài.\n" +
   "- summary: 1-2 câu tiếng Việt tóm tắt vị trí cho người lướt nhanh. Chỉ dùng dữ kiện có trong bài.\n" +
+  "- clean_description: viết lại nội dung thành mô tả vị trí gọn gàng, trung tính, dễ đọc. " +
+  "CHỈ dùng dữ kiện có trong bài, giữ nguyên mọi con số. BỎ phần tán gẫu, bình luận cá nhân, " +
+  "nhận xét về công ty hay về cách tuyển của họ, chuyện ngoài lề, câu đối đáp trong nhóm. " +
+  "Không thêm thông tin không có. Giữ xuống dòng cho dễ đọc.\n" +
   "\n" +
   "CẢNH BÁO LỪA ĐẢO — risk_level:\n" +
   "- 'suspect' khi có bất kỳ dấu hiệu: đòi đặt cọc/nộp phí/mua tài liệu trước, hứa 'việc nhẹ lương cao', " +
@@ -83,7 +107,7 @@ const SYSTEM_PROMPT =
   '{"is_job": boolean, "reject_reason": string, "title": string, "company": string, "level": string, ' +
   '"location": string, "work_mode": string, "salary": string, "employment_type": string, ' +
   '"years_exp": string, "skills": string[], "deadline": string, "contact": string, "summary": string, ' +
-  '"risk_level": "ok"|"suspect", "risk_reason": string}. ' +
+  '"clean_description": string, "risk_level": "ok"|"suspect", "risk_reason": string}. ' +
   "Khi is_job=false, các trường còn lại để chuỗi rỗng và skills để [].";
 
 function asText(value: unknown, fallback = NA): string {
@@ -120,6 +144,7 @@ export function normalizeExtracted(parsed: Record<string, unknown>): ExtractedJo
     deadline: asText(parsed.deadline),
     contact: asText(parsed.contact),
     summary: asText(parsed.summary, ""),
+    clean_description: asText(parsed.clean_description, ""),
     // Giá trị lạ từ model được coi là đáng ngờ — nghiêng về phía an toàn.
     risk_level: parsed.risk_level === "ok" ? "ok" : "suspect",
     risk_reason: asText(parsed.risk_reason, ""),

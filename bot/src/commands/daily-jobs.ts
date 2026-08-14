@@ -13,8 +13,8 @@ import {
 } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
 import { collectRawJobs, collectTelegramRaw } from "../jobs/collect.js";
-import { jobFingerprint, mergeSources, parseSources } from "../jobs/dedupe.js";
-import { extractJob } from "../jobs/extract.js";
+import { jobFingerprint, mergeSources, normalizeLocation, parseSources } from "../jobs/dedupe.js";
+import { extractJob, type ExtractedJob } from "../jobs/extract.js";
 
 /**
  * Cron hằng ngày: gom tin từ group Facebook công khai + topic Telegram + group
@@ -57,6 +57,26 @@ async function notifyBestEffort(text: string): Promise<void> {
   } catch {
     // Telegram lỗi nốt thì đành chịu — đã có bot_errors + log cron.
   }
+}
+
+/**
+ * Nội dung hiển thị ra trang công khai.
+ *
+ * Facebook: NGUYÊN VĂN bài gốc. Đó là bài đăng công khai, người đăng chủ động
+ * viết để tuyển người, và trang có link về bản gốc để đối chiếu.
+ *
+ * Zalo/Telegram: bản đã dọn. Nội dung gốc ở đây là chat nhóm — lẫn tán gẫu,
+ * bình luận cá nhân về công ty, câu đối đáp giữa mọi người. Đăng nguyên văn
+ * chat của nhóm kín lên trang có index SEO là chuyện khác hẳn với đăng lại một
+ * bài vốn đã công khai. Không dọn được thì lùi về tóm tắt, cuối cùng mới là
+ * nguyên văn.
+ */
+export function descriptionFor(
+  raw: Pick<JobRawRow, "source" | "text">,
+  job: Pick<ExtractedJob, "clean_description" | "summary">,
+): string {
+  if (raw.source === "facebook") return raw.text;
+  return job.clean_description || job.summary || raw.text;
 }
 
 /** Đưa một mẩu thô qua AI rồi ghi vào kho. Trả về việc đã làm với nó. */
@@ -103,6 +123,7 @@ async function processRaw(
     company: job.company,
     level: job.level,
     location: job.location,
+    city: normalizeLocation(job.location),
     workMode: job.work_mode,
     salary: job.salary,
     employmentType: job.employment_type,
@@ -111,8 +132,7 @@ async function processRaw(
     deadline: job.deadline,
     contact: job.contact,
     summary: job.summary,
-    // Nguyên văn bài gốc — không qua tay model. Xem lý do trong jobs/extract.ts.
-    description: raw.text,
+    description: descriptionFor(raw, job),
     source: raw.source,
     sourceId: raw.source_id,
     sourceUrl: raw.source_url,

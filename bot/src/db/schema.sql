@@ -330,6 +330,8 @@ CREATE TABLE IF NOT EXISTS job_posts (
   company         TEXT NOT NULL DEFAULT 'N/A',
   level           TEXT NOT NULL DEFAULT 'N/A',
   location        TEXT NOT NULL DEFAULT 'N/A',
+  -- Thành phố đã chuẩn hoá từ location, để trang web lọc theo nơi làm việc.
+  city            TEXT NOT NULL DEFAULT '',
   work_mode       TEXT NOT NULL DEFAULT 'N/A',   -- onsite | hybrid | remote | N/A
   salary          TEXT NOT NULL DEFAULT 'N/A',
   employment_type TEXT NOT NULL DEFAULT 'N/A',   -- full-time | part-time | contract | intern | N/A

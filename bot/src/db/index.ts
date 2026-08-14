@@ -24,6 +24,7 @@ export function getDb(): Database.Database {
 
   const schema = fs.readFileSync(path.join(__dirname, "schema.sql"), "utf8");
   db.exec(schema);
+  runColumnMigrations(db);
   db.prepare(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at, note)
      VALUES (@version, @appliedAt, @note)`,
@@ -33,6 +34,31 @@ export function getDb(): Database.Database {
     note: "Kho tin tuyển dụng (job_raw, job_posts) cho bahub.vn/tuyen-dung.",
   });
   return db;
+}
+
+/**
+ * Thêm cột cho bảng ĐÃ TỒN TẠI.
+ *
+ * schema.sql chỉ dùng CREATE TABLE IF NOT EXISTS nên bảng đã có sẽ không nhận
+ * được cột mới — DB đang chạy trên VPS sẽ thiếu cột và mọi câu lệnh gãy. Hàm này
+ * so với PRAGMA table_info rồi ALTER khi thiếu, chạy được cả trên DB mới lẫn cũ.
+ *
+ * Chỉ dùng cho cột THÊM VÀO có giá trị mặc định. Đổi kiểu hay xoá cột thì SQLite
+ * cần dựng lại bảng, phải viết migration riêng.
+ */
+function runColumnMigrations(database: Database.Database): void {
+  const additions: [table: string, column: string, definition: string][] = [
+    // Thành phố đã chuẩn hoá từ location, để trang tuyển dụng lọc theo nơi làm
+    // việc mà không phải so chuỗi tự do ("Lê Văn Lương, HN" vs "Cầu Giấy, Hà Nội").
+    ["job_posts", "city", "TEXT NOT NULL DEFAULT ''"],
+  ];
+
+  for (const [table, column, definition] of additions) {
+    const columns = database.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+    if (columns.length === 0) continue; // Bảng chưa tồn tại — schema.sql lo phần đó.
+    if (columns.some((c) => c.name === column)) continue;
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 // ---- Types ----
@@ -773,6 +799,7 @@ export interface JobPostRow {
   company: string;
   level: string;
   location: string;
+  city: string;
   work_mode: string;
   salary: string;
   employment_type: string;
@@ -805,6 +832,7 @@ export interface JobPostInput {
   company: string;
   level: string;
   location: string;
+  city: string;
   workMode: string;
   salary: string;
   employmentType: string;
@@ -838,13 +866,13 @@ export function insertJobPost(input: JobPostInput): void {
   getDb()
     .prepare(
       `INSERT INTO job_posts
-         (fingerprint, title, company, level, location, work_mode, salary, employment_type,
+         (fingerprint, title, company, level, location, city, work_mode, salary, employment_type,
           years_exp, skills_json, deadline, contact, summary, description,
           source, source_id, source_url, author, sources_json,
           posted_at, last_seen_at, repost_count, expires_at,
           risk_level, risk_reason, model, is_published, created_at, updated_at)
        VALUES
-         (@fingerprint, @title, @company, @level, @location, @workMode, @salary, @employmentType,
+         (@fingerprint, @title, @company, @level, @location, @city, @workMode, @salary, @employmentType,
           @yearsExp, @skillsJson, @deadline, @contact, @summary, @description,
           @source, @sourceId, @sourceUrl, @author, @sourcesJson,
           @postedAt, @postedAt, 0, @expiresAt,

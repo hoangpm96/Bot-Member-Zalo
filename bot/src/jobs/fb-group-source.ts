@@ -105,8 +105,9 @@ async function fetchOnce(groupSlug: string): Promise<string> {
     const target = res.headers.get("location") ?? "";
     throw new Error(
       /login/i.test(target)
-        ? "Facebook đá về trang đăng nhập — IP đang bị chặn tạm vì gọi quá dày. " +
-          "Giảm nhịp gọi hoặc đổi JOB_FB_USER_AGENT."
+        ? "Facebook đá về trang đăng nhập — IP này không được xem nội dung group khi chưa " +
+          "đăng nhập. Thường gặp với IP trung tâm dữ liệu (VPS) và không tự hết theo thời gian; " +
+          "cần đi qua proxy/dịch vụ crawl thay vì chờ."
         : `Facebook chuyển hướng sang ${target || "(không rõ)"}.`,
     );
   }

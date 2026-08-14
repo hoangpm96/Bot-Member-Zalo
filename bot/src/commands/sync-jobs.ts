@@ -62,6 +62,8 @@ export function toJobPayload(row: JobPostRow, nowIso: string): Record<string, un
     company: row.company,
     level: row.level,
     location: row.location,
+    // Thành phố đã chuẩn hoá — web lọc theo cột này thay vì so chuỗi tự do.
+    city: row.city,
     work_mode: row.work_mode,
     salary: row.salary,
     employment_type: row.employment_type,
