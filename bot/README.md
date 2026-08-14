@@ -59,7 +59,8 @@ Tất cả lệnh chạy bằng **1 tài khoản phụ co-admin** (quét QR 1 l�
 | `npm run telegram-poll` | Cron mỗi phút để nhận Duyệt/Huỷ, auto-timeout, `/retry`. |
 | `npm run telegram-find-topic` | Đọc một message Telegram mới để tìm `chat_id` và `message_thread_id`. |
 | `npm run telegram-forward-test` | Gửi thử vào đúng channel/topic đã cấu hình. |
-| `npm run sync-summaries` | Cron (mỗi giờ 9h-23h): đẩy kho `daily_summaries` lên Supabase bahub.vn → hiện ở `bahub.vn/ban-tin`. Chạy tăng dần theo con trỏ trong `bot_state`; thêm `-- --full` để đẩy lại toàn bộ. Cần `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. |
+| `npm run sync-posts` | Cron (mỗi giờ 9h-23h): đẩy kho `daily_public_posts` (bản tin công khai) lên Supabase bahub.vn → hiện ở `bahub.vn/ban-tin`. Chạy tăng dần theo con trỏ trong `bot_state`; thêm `-- --full` để đẩy lại toàn bộ. Cần `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY`. |
+| `npm run backfill-fb-posts` | Bù bản tin công khai cho ngày quá khứ (soạn bài + sinh ảnh, KHÔNG đăng Facebook). `-- --from/--to/--day/--max-days/--force/--no-images`; `DRY_RUN=1` chỉ liệt kê. |
 | `npm run install-cron` | Cài cron tự động cho warning, monthly cleanup, Telegram polling trên VPS. |
 | `npm run setup-vps` | Setup VPS một lần: install, typecheck, PM2 listener, cron jobs. |
 | `npm run build` | Emit JavaScript runtime vào `dist/` cho PM2/cron production. |

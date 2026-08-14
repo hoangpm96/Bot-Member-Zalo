@@ -24,6 +24,29 @@ server {
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
 
+    # Ảnh minh hoạ bản tin công khai — bahub.vn/ban-tin nhúng thẳng từ đây, nên
+    # đây là lối đi DUY NHẤT không Basic Auth trên host này. Chỉ file tĩnh do
+    # bot ghi ra (BULLETIN_IMAGE_DIR), không proxy vào app.
+    #
+    # Ảnh cùng một ngày giữ nguyên tên file, nên URL bot đẩy lên Supabase có
+    # thêm ?v=<timestamp>; nhờ vậy cache 30 ngày ở đây vẫn an toàn khi một ngày
+    # cũ được soạn lại.
+    location ^~ /bt/ {
+        auth_basic off;
+        alias /var/lib/bot-member-zalo/public/bt/;
+        autoindex off;
+        access_log off;
+        limit_except GET HEAD {
+            deny all;
+        }
+        expires 30d;
+        # add_header trong location thay thế TOÀN BỘ add_header của server
+        # block, nên nosniff phải khai lại ở đây chứ không kế thừa.
+        add_header Cache-Control "public";
+        add_header X-Content-Type-Options "nosniff";
+        try_files $uri =404;
+    }
+
     location / {
         auth_basic "Bot Member Zalo";
         auth_basic_user_file /etc/nginx/.htpasswd;

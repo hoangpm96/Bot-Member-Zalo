@@ -8,12 +8,13 @@ import { runImportInteractions } from "./commands/import-interactions.js";
 import { runSyncMembers } from "./commands/sync-members.js";
 import { runSyncVotes } from "./commands/sync-votes.js";
 import { runSyncLeaderboard } from "./commands/sync-leaderboard.js";
-import { runSyncSummaries } from "./commands/sync-summaries.js";
+import { runSyncPosts } from "./commands/sync-posts.js";
 import { runTelegramTest } from "./commands/telegram-test.js";
 import { runTelegramFindTopic, runTelegramForwardTest } from "./commands/telegram-forward.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { runDailyFbPostSafe } from "./commands/daily-fb-post.js";
 import { runBackfillSummaries } from "./commands/backfill-summaries.js";
+import { runBackfillFbPosts } from "./commands/backfill-fb-posts.js";
 import { recordBotError } from "./db/index.js";
 
 /**
@@ -41,7 +42,7 @@ Cách dùng:
   npm run health-check      # cron: báo Telegram nếu bot heartbeat stale
   npm run sync-votes        # đọc người đã vote trong poll group → ghi tương tác (cả vote cũ)
   npm run sync-leaderboard  # cron: đẩy bảng xếp hạng lên Supabase → hiện ở bahub.vn/leaderboard
-  npm run sync-summaries    # cron: đẩy kho bản tin ngày lên Supabase → hiện ở bahub.vn/ban-tin (--full: đẩy lại hết)
+  npm run sync-posts        # cron: đẩy kho bản tin công khai lên Supabase → hiện ở bahub.vn/ban-tin (--full: đẩy lại hết)
   npm run telegram-test     # gửi tin thử để kiểm TELEGRAM_BOT_TOKEN + CHAT_ID
   npm run telegram-find-topic # tìm chat ID + forum topic ID từ một message mới
   npm run telegram-forward-test # gửi thử vào đúng đích forward Zalo
@@ -51,6 +52,7 @@ Cách dùng:
   npm run daily-summary     # cron 9:10 sáng: tóm tắt tin nhắn hôm qua (DeepSeek) → gửi các group/Telegram
   npm run daily-fb-post     # cron 8:00 sáng: bản tin public + ảnh AI → đăng Facebook Page, báo link Telegram
   npm run backfill-summaries # bù kho daily_summaries cho ngày quá khứ (--from/--to/--max-days, DRY_RUN=1 chỉ liệt kê)
+  npm run backfill-fb-posts # bù kho bản tin công khai cho ngày quá khứ (--from/--to/--day/--max-days/--force/--no-images)
 `;
 
 async function main(): Promise<void> {
@@ -84,8 +86,8 @@ async function main(): Promise<void> {
     case "sync-leaderboard":
       await runSyncLeaderboard();
       break;
-    case "sync-summaries":
-      await runSyncSummaries(process.argv.slice(3));
+    case "sync-posts":
+      await runSyncPosts(process.argv.slice(3));
       break;
     case "telegram-test":
       await runTelegramTest();
@@ -113,6 +115,9 @@ async function main(): Promise<void> {
       break;
     case "backfill-summaries":
       await runBackfillSummaries();
+      break;
+    case "backfill-fb-posts":
+      await runBackfillFbPosts();
       break;
     default:
       console.log(USAGE);

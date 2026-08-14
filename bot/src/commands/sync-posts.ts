@@ -1,41 +1,47 @@
 import {
   getBotState,
-  listDailySummariesForSync,
+  listPublicPostsForSync,
   setBotState,
-  type DailySummarySyncRow,
+  type PublicPostRow,
 } from "../db/index.js";
+import { parseTopics } from "./daily-fb-post.js";
 
 /**
- * Đẩy kho bản tin tóm tắt hằng ngày (daily_summaries) lên Supabase của
- * bahub.vn — bảng public.zalo_daily_summaries — để trang bahub.vn/ban-tin hiển
- * thị. Cùng mô hình với sync-leaderboard: bot đẩy một chiều, blog chỉ đọc.
+ * Đẩy kho BẢN TIN CÔNG KHAI (daily_public_posts) lên Supabase của bahub.vn —
+ * bảng public.zalo_bulletin_posts — để trang bahub.vn/ban-tin hiển thị dạng
+ * card, đúng nội dung đã đăng Facebook Page. Cùng mô hình sync-leaderboard:
+ * bot đẩy một chiều, blog chỉ đọc.
  *
- * RIÊNG TƯ: chỉ đẩy summary_text + số liệu tổng hợp + tên hiển thị top sender
- * (đã qua sanitizeDisplayName lúc tóm tắt). TUYỆT ĐỐI không đẩy zalo_user_id,
- * transcript hay parts_json.
+ * RIÊNG TƯ: đây là bản ĐÃ LƯỢC tên thành viên và chuyện nội bộ ngay từ lúc
+ * soạn (draftPublicPost). Bản tóm tắt nội bộ đầy đủ (daily_summaries) KHÔNG
+ * BAO GIỜ rời khỏi VPS — đó là lý do bảng zalo_daily_summaries bên Supabase đã
+ * bị gỡ bỏ.
+ *
+ * Cũng không đẩy image_prompt (chi tiết kỹ thuật) và image_file (đường dẫn nội
+ * bộ trên VPS) — web chỉ cần title, caption, image_url.
  *
  * KHÔNG ghi đè cờ hiển thị: payload cố tình không có cột is_published, nên
  * PostgREST upsert chỉ set các cột có trong payload — ngày admin đã ẩn bên
  * bahub.vn sẽ KHÔNG bị lần sync sau bật lại.
  *
- * Chạy tăng dần theo con trỏ (created_at, day_date) lưu ở bot_state; ngày cũ
- * được backfill/tóm tắt lại sẽ có created_at mới nên tự động được đẩy lại.
- * `sync-summaries --full` bỏ qua con trỏ và đẩy lại toàn bộ kho.
+ * Chạy tăng dần theo con trỏ (updated_at, day_date) lưu ở bot_state; ngày soạn
+ * lại có updated_at mới nên tự động được đẩy lại. `sync-posts --full` bỏ qua
+ * con trỏ và đẩy lại toàn bộ kho.
  */
 
-const TABLE = "zalo_daily_summaries";
-const STATE_KEY = "summaries_sync_cursor";
-/** Số ngày mỗi request REST — bản tin ~8KB nên 25 ngày ≈ 200KB, an toàn. */
+const TABLE = "zalo_bulletin_posts";
+const STATE_KEY = "public_posts_sync_cursor";
+/** Số ngày mỗi request REST — mỗi ngày ~4KB chữ nên 25 ngày ≈ 100KB, an toàn. */
 const BATCH_SIZE = 25;
 /** Trần mỗi lần chạy, chặn vòng lặp vô hạn nếu con trỏ không tiến được. */
 const MAX_BATCHES = 40;
 
 interface Cursor {
-  createdAt: number;
+  updatedAt: number;
   dayDate: string;
 }
 
-const ZERO_CURSOR: Cursor = { createdAt: 0, dayDate: "" };
+const ZERO_CURSOR: Cursor = { updatedAt: 0, dayDate: "" };
 
 function readCursor(): Cursor {
   const raw = getBotState(STATE_KEY);
@@ -43,7 +49,7 @@ function readCursor(): Cursor {
   try {
     const parsed = JSON.parse(raw) as Partial<Cursor>;
     return {
-      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : 0,
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
       dayDate: typeof parsed.dayDate === "string" ? parsed.dayDate : "",
     };
   } catch {
@@ -55,26 +61,23 @@ function writeCursor(cursor: Cursor): void {
   setBotState(STATE_KEY, JSON.stringify(cursor), Date.now());
 }
 
-function parseTopSenders(raw: string): string[] {
-  try {
-    const parsed = JSON.parse(raw || "[]");
-    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
-  } catch {
-    return [];
-  }
-}
+export function toPostPayload(row: PublicPostRow, nowIso: string): Record<string, unknown> {
+  const topics = parseTopics(row.topics_json).map((topic) => ({
+    title: topic.title,
+    caption: topic.caption,
+    image_url: topic.image_url ?? null,
+  }));
 
-function toPayload(row: DailySummarySyncRow, nowIso: string): Record<string, unknown> {
   return {
     day_date: row.day_date,
     day_label: row.day_label,
-    summary_text: row.summary_text,
-    total_messages: row.total_messages,
-    included_messages: row.included_messages,
-    unique_senders: row.unique_senders,
-    images: row.images,
-    videos: row.videos,
-    top_senders: parseTopSenders(row.top_senders_json),
+    main_caption: row.main_caption,
+    topics,
+    // Cột riêng để web lọc/sắp xếp mà không phải mở JSON ra đếm.
+    topic_count: topics.length,
+    skipped_reason: row.skipped_reason,
+    fb_post_id: row.fb_post_id,
+    fb_url: row.fb_post_id ? `https://www.facebook.com/${row.fb_post_id}` : null,
     model: row.model,
     source: row.source,
     synced_at: nowIso,
@@ -104,7 +107,7 @@ async function upsertBatch(
   }
 }
 
-export async function runSyncSummaries(argv: string[] = []): Promise<void> {
+export async function runSyncPosts(argv: string[] = []): Promise<void> {
   const supabaseUrl = process.env.SUPABASE_URL?.trim().replace(/\/+$/, "");
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
   if (!supabaseUrl || !serviceKey) {
@@ -116,31 +119,30 @@ export async function runSyncSummaries(argv: string[] = []): Promise<void> {
   const full = argv.includes("--full");
   let cursor = full ? ZERO_CURSOR : readCursor();
   let pushed = 0;
+  let withTopics = 0;
 
   for (let batch = 0; batch < MAX_BATCHES; batch += 1) {
-    const rows = listDailySummariesForSync(cursor, BATCH_SIZE);
+    const rows = listPublicPostsForSync(cursor, BATCH_SIZE);
     if (rows.length === 0) break;
 
     const nowIso = new Date().toISOString();
-    await upsertBatch(
-      supabaseUrl,
-      serviceKey,
-      rows.map((row) => toPayload(row, nowIso)),
-    );
+    const payloads = rows.map((row) => toPostPayload(row, nowIso));
+    await upsertBatch(supabaseUrl, serviceKey, payloads);
 
     // Ghi con trỏ NGAY sau khi đẩy xong lô: chạy đứt giữa chừng thì lần sau
     // tiếp tục từ đây thay vì đẩy lại từ đầu.
     const last = rows[rows.length - 1]!;
-    cursor = { createdAt: last.created_at, dayDate: last.day_date };
+    cursor = { updatedAt: last.updated_at, dayDate: last.day_date };
     writeCursor(cursor);
     pushed += rows.length;
+    withTopics += payloads.filter((p) => (p.topic_count as number) > 0).length;
 
     if (rows.length < BATCH_SIZE) break;
   }
 
   console.log(
     pushed === 0
-      ? `[sync-summaries] Không có bản tin mới để đẩy (con trỏ ${cursor.createdAt}/${cursor.dayDate || "-"}).`
-      : `[sync-summaries] Đã đẩy ${pushed} ngày lên ${TABLE}${full ? " (chạy full)" : ""}.`,
+      ? `[sync-posts] Không có bản tin mới để đẩy (con trỏ ${cursor.updatedAt}/${cursor.dayDate || "-"}).`
+      : `[sync-posts] Đã đẩy ${pushed} ngày (${withTopics} ngày có bài) lên ${TABLE}${full ? " (chạy full)" : ""}.`,
   );
 }

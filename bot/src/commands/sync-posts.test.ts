@@ -5,20 +5,20 @@ import os from "node:os";
 import path from "node:path";
 
 /**
- * Test lệnh sync-summaries trên một SQLite tạm + fetch giả.
+ * Test lệnh sync-posts trên một SQLite tạm + fetch giả.
  * Chạy: npm test (node --import tsx --test).
  *
  * SQLITE_DB_PATH phải được set TRƯỚC khi import config/db (config đọc env lúc
  * import), nên phần import ở đây là dynamic import sau khi gán env.
  */
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bot-sync-summaries-"));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "bot-sync-posts-"));
 process.env.SQLITE_DB_PATH = path.join(tmpDir, "test.db");
 process.env.SUPABASE_URL = "https://example.supabase.co";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
 
-const { saveDailySummary, getDb } = await import("../db/index.js");
-const { runSyncSummaries } = await import("./sync-summaries.js");
+const { savePublicPost, setPublicPostFbId, getDb } = await import("../db/index.js");
+const { runSyncPosts } = await import("./sync-posts.js");
 
 interface CapturedRequest {
   url: string;
@@ -39,30 +39,45 @@ function stubFetch(status = 200): CapturedRequest[] {
   return captured;
 }
 
-function seedDay(dayDate: string, createdAt: number, summaryText = "📢 THÔNG BÁO\n- có tin"): void {
-  saveDailySummary({
+function seedDay(dayDate: string, updatedAt: number, caption = "Hook mở bài"): void {
+  savePublicPost({
     dayDate,
     dayLabel: dayDate.split("-").reverse().join("/"),
     dayStartTs: Date.parse(`${dayDate}T00:00:00+07:00`),
-    threadId: "thread-1",
-    summaryText,
-    parts: ["phần 1"],
-    totalMessages: 85,
-    includedMessages: 80,
-    uniqueSenders: 14,
-    images: 4,
-    videos: 0,
-    topSenders: ["Lucas (27)", "Võ Phương (18)"],
+    mainCaption: caption,
+    topicsJson: JSON.stringify([
+      {
+        title: "Ước lượng effort",
+        caption: "Nội dung chủ đề 1",
+        image_prompt: "two people at a whiteboard",
+        image_file: `${dayDate}-topic-1.png`,
+        image_url: `https://bot.bahub.vn/bt/${dayDate}/topic-1.webp?v=${updatedAt}`,
+      },
+    ]),
     model: "deepseek-v4-flash",
-    transcriptChars: 1234,
     source: "live",
-    now: createdAt,
+    now: updatedAt,
+  });
+}
+
+/** Ngày model kết luận không đủ nội dung đáng đăng. */
+function seedSkippedDay(dayDate: string, updatedAt: number): void {
+  savePublicPost({
+    dayDate,
+    dayLabel: dayDate.split("-").reverse().join("/"),
+    dayStartTs: Date.parse(`${dayDate}T00:00:00+07:00`),
+    mainCaption: "",
+    topicsJson: "[]",
+    skippedReason: "Cả ngày chỉ có chào hỏi và hẹn cà phê.",
+    model: "deepseek-v4-flash",
+    source: "backfill",
+    now: updatedAt,
   });
 }
 
 function resetStore(): void {
   const db = getDb();
-  db.prepare("DELETE FROM daily_summaries").run();
+  db.prepare("DELETE FROM daily_public_posts").run();
   db.prepare("DELETE FROM bot_state").run();
 }
 
@@ -70,12 +85,13 @@ test("đẩy toàn bộ kho khi chưa có con trỏ, đúng payload", async () =
   resetStore();
   seedDay("2026-08-10", 1_000);
   seedDay("2026-08-11", 2_000);
+  setPublicPostFbId("2026-08-11", "1234_5678", 2_000);
   const captured = stubFetch();
 
-  await runSyncSummaries();
+  await runSyncPosts();
 
   assert.equal(captured.length, 1);
-  assert.match(captured[0]!.url, /\/rest\/v1\/zalo_daily_summaries\?on_conflict=day_date$/);
+  assert.match(captured[0]!.url, /\/rest\/v1\/zalo_bulletin_posts\?on_conflict=day_date$/);
   assert.deepEqual(
     captured[0]!.rows.map((r) => r.day_date),
     ["2026-08-10", "2026-08-11"],
@@ -83,51 +99,76 @@ test("đẩy toàn bộ kho khi chưa có con trỏ, đúng payload", async () =
 
   const row = captured[0]!.rows[1]!;
   assert.equal(row.day_label, "11/08/2026");
-  assert.equal(row.total_messages, 85);
-  assert.equal(row.unique_senders, 14);
-  assert.deepEqual(row.top_senders, ["Lucas (27)", "Võ Phương (18)"]);
+  assert.equal(row.main_caption, "Hook mở bài");
+  assert.equal(row.topic_count, 1);
+  assert.equal(row.fb_post_id, "1234_5678");
+  assert.equal(row.fb_url, "https://www.facebook.com/1234_5678");
   assert.equal(row.model, "deepseek-v4-flash");
   assert.equal(typeof row.synced_at, "string");
+
+  const topics = row.topics as Record<string, unknown>[];
+  assert.equal(topics.length, 1);
+  assert.equal(topics[0]!.title, "Ước lượng effort");
+  assert.match(String(topics[0]!.image_url), /^https:\/\/bot\.bahub\.vn\/bt\//);
 });
 
-test("KHÔNG gửi cột is_published (không bật lại ngày admin đã ẩn) và không gửi dữ liệu nhạy cảm", async () => {
+test("KHÔNG gửi cột is_published, không gửi prompt ảnh hay đường dẫn file trên VPS", async () => {
   resetStore();
   seedDay("2026-08-10", 1_000);
   const captured = stubFetch();
 
-  await runSyncSummaries();
+  await runSyncPosts();
 
-  const keys = Object.keys(captured[0]!.rows[0]!);
+  const row = captured[0]!.rows[0]!;
+  const keys = Object.keys(row);
   assert.ok(!keys.includes("is_published"), `payload không được có is_published: ${keys}`);
-  for (const forbidden of ["zalo_user_id", "parts_json", "parts", "transcript_chars", "thread_id"]) {
+  for (const forbidden of ["summary_text", "top_senders", "zalo_user_id", "topics_json"]) {
     assert.ok(!keys.includes(forbidden), `payload không được có ${forbidden}`);
   }
+
+  // Chủ đề chỉ mang thứ web cần hiển thị.
+  const topicKeys = Object.keys((row.topics as Record<string, unknown>[])[0]!);
+  assert.deepEqual(topicKeys.sort(), ["caption", "image_url", "title"]);
+});
+
+test("ngày không đủ nội dung vẫn được đẩy với topic_count = 0 để web gỡ xuống", async () => {
+  resetStore();
+  seedSkippedDay("2026-08-09", 1_000);
+  const captured = stubFetch();
+
+  await runSyncPosts();
+
+  const row = captured[0]!.rows[0]!;
+  assert.equal(row.topic_count, 0);
+  assert.deepEqual(row.topics, []);
+  assert.equal(row.skipped_reason, "Cả ngày chỉ có chào hỏi và hẹn cà phê.");
+  assert.equal(row.fb_url, null);
 });
 
 test("chạy lại khi không có gì mới thì không gọi Supabase", async () => {
   resetStore();
   seedDay("2026-08-10", 1_000);
   stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
 
   const second = stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
   assert.equal(second.length, 0);
 });
 
-test("ngày cũ được tóm tắt lại (created_at mới) thì được đẩy lại", async () => {
+test("ngày cũ được soạn lại (updated_at mới) thì được đẩy lại", async () => {
   resetStore();
   seedDay("2026-08-10", 1_000);
   stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
 
-  seedDay("2026-08-10", 5_000, "📢 THÔNG BÁO\n- bản sửa");
+  seedDay("2026-08-10", 5_000, "Hook mới sau khi soạn lại");
   const second = stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
 
   assert.equal(second.length, 1);
   assert.equal(second[0]!.rows.length, 1);
-  assert.equal(second[0]!.rows[0]!.summary_text, "📢 THÔNG BÁO\n- bản sửa");
+  assert.equal(second[0]!.rows[0]!.main_caption, "Hook mới sau khi soạn lại");
 });
 
 test("--full bỏ qua con trỏ và đẩy lại toàn bộ", async () => {
@@ -135,14 +176,14 @@ test("--full bỏ qua con trỏ và đẩy lại toàn bộ", async () => {
   seedDay("2026-08-10", 1_000);
   seedDay("2026-08-11", 2_000);
   stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
 
   const second = stubFetch();
-  await runSyncSummaries(["--full"]);
+  await runSyncPosts(["--full"]);
   assert.equal(second[0]!.rows.length, 2);
 });
 
-test("nhiều ngày trùng created_at vượt kích thước lô vẫn không sót ngày nào", async () => {
+test("nhiều ngày trùng updated_at vượt kích thước lô vẫn không sót ngày nào", async () => {
   resetStore();
   // Backfill chạy vòng lặp nhanh có thể ghi nhiều ngày trong cùng mili-giây.
   const expected: string[] = [];
@@ -153,7 +194,7 @@ test("nhiều ngày trùng created_at vượt kích thước lô vẫn không s�
   }
   const captured = stubFetch();
 
-  await runSyncSummaries();
+  await runSyncPosts();
 
   const pushed = captured.flatMap((req) => req.rows.map((r) => String(r.day_date))).sort();
   assert.deepEqual(pushed, expected.sort());
@@ -164,10 +205,10 @@ test("Supabase lỗi thì ném lỗi và KHÔNG tiến con trỏ", async () => {
   seedDay("2026-08-10", 1_000);
   stubFetch(500);
 
-  await assert.rejects(() => runSyncSummaries(), /HTTP 500/);
+  await assert.rejects(() => runSyncPosts(), /HTTP 500/);
 
   const retry = stubFetch();
-  await runSyncSummaries();
+  await runSyncPosts();
   assert.equal(retry.length, 1, "lần chạy sau phải đẩy lại ngày bị lỗi");
 });
 
@@ -176,7 +217,7 @@ test("thiếu biến môi trường Supabase thì báo lỗi rõ ràng", async (
   const saved = process.env.SUPABASE_SERVICE_ROLE_KEY;
   delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   try {
-    await assert.rejects(() => runSyncSummaries(), /SUPABASE_SERVICE_ROLE_KEY/);
+    await assert.rejects(() => runSyncPosts(), /SUPABASE_SERVICE_ROLE_KEY/);
   } finally {
     process.env.SUPABASE_SERVICE_ROLE_KEY = saved;
   }

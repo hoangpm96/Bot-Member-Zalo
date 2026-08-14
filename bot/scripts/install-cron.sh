@@ -63,14 +63,15 @@ CRON_TZ=Asia/Ho_Chi_Minh
 # and SUMMARY_TELEGRAM_CHAT_ID. Zalo groups are spaced SUMMARY_GROUP_GAP_MINUTES apart.
 10 9 * * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" daily-summary >> "$LOG_DIR/daily-summary.log" 2>&1
 
-# Push daily summaries to bahub.vn Supabase (public.zalo_daily_summaries -> bahub.vn/ban-tin).
-# Runs after daily-summary; hourly retry so a VPS/network hiccup self-heals within the day.
-# Incremental (cursor in bot_state); needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.
-40 9-23 * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-summaries >> "$LOG_DIR/sync-summaries.log" 2>&1
-
 # Daily Facebook post. Public digest of yesterday (DeepSeek) + AI images -> multi-photo post
 # on FB_PAGE_ID, then Telegram link for admin to share. No-op unless FB_PAGE_* are set.
+# This is also the source for bahub.vn/ban-tin, so it runs before sync-posts.
 0 8 * * * cd "$BOT_DIR" && DRY_RUN=0 "$NODE_BIN" "$BOT_DIR/dist/index.js" daily-fb-post >> "$LOG_DIR/daily-fb-post.log" 2>&1
+
+# Push the public bulletin to bahub.vn Supabase (public.zalo_bulletin_posts -> bahub.vn/ban-tin).
+# Runs after daily-fb-post; hourly retry so a VPS/network hiccup self-heals within the day.
+# Incremental (cursor in bot_state); needs SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY in .env.
+40 9-23 * * * cd "$BOT_DIR" && "$NODE_BIN" "$BOT_DIR/dist/index.js" sync-posts >> "$LOG_DIR/sync-posts.log" 2>&1
 $MARKER_END
 EOF
 

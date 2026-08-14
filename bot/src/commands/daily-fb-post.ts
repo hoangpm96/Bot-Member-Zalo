@@ -3,11 +3,15 @@ import path from "node:path";
 import { config } from "../config.js";
 import {
   acquireLock,
+  deleteBotState,
   getBotState,
+  getPublicPostByDate,
   listGroupMessagesBetween,
   recordBotError,
   releaseLock,
-  setBotState,
+  savePublicPost,
+  setPublicPostFbId,
+  type PublicPostRow,
 } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
 import {
@@ -18,14 +22,19 @@ import {
 } from "../summary.js";
 import {
   type PublicPost,
+  type PublicPostTopic,
   brandImage,
   draftPublicPost,
   generateTopicImage,
   postMultiPhoto,
+  publishTopicImage,
 } from "../fb-post.js";
 
-const STATE_KEY = "daily_fb_post_last";
-const LOCK_KEY = "daily_fb_post_lock";
+/** Key bot_state của bản cũ (trước khi có bảng daily_public_posts) — chỉ còn dùng để cứu 1 lần. */
+const LEGACY_STATE_KEY = "daily_fb_post_last";
+/** Lock dùng chung với backfill-fb-posts — hai bên đều gọi model + sinh ảnh, không được chồng. */
+export const FB_POST_LOCK_KEY = "daily_fb_post_lock";
+const LOCK_KEY = FB_POST_LOCK_KEY;
 const LOCK_STALE_MS = 2 * 60 * 60 * 1000;
 /** Heartbeat listener cũ hơn ngưỡng này → "ngày yên ắng" đáng ngờ, không kết luận bừa. */
 const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
@@ -33,36 +42,62 @@ const HEARTBEAT_STALE_MS = 15 * 60 * 1000;
 const POST_ATTEMPTS = 3;
 const POST_RETRY_GAP_MS = 5 * 60 * 1000;
 
-/**
- * Trạng thái theo ngày trong bot_state: giữ bản public đã soạn để lần chạy lại
- * (cron nhân đôi / retry tay) KHÔNG gọi lại DeepSeek, và postId để chống đăng trùng.
- */
-interface FbPostState {
-  dayLabel: string;
-  post?: PublicPost;
-  postId?: string;
-  createdAt: number;
+/** Thư mục cache ảnh PNG đã brand (bản gửi Facebook), theo ngày. */
+export function fbCacheDir(): string {
+  return path.resolve("data", "fb-cache");
 }
 
-function readState(): FbPostState | null {
-  const raw = getBotState(STATE_KEY);
-  if (!raw) return null;
+export function parseTopics(topicsJson: string): PublicPostTopic[] {
   try {
-    const parsed = JSON.parse(raw) as Partial<FbPostState>;
-    if (typeof parsed.dayLabel !== "string") return null;
-    return {
-      dayLabel: parsed.dayLabel,
-      post: parsed.post,
-      postId: typeof parsed.postId === "string" ? parsed.postId : undefined,
-      createdAt: typeof parsed.createdAt === "number" ? parsed.createdAt : 0,
-    };
+    const parsed = JSON.parse(topicsJson || "[]");
+    return Array.isArray(parsed) ? (parsed as PublicPostTopic[]) : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-function writeState(state: FbPostState): void {
-  setBotState(STATE_KEY, JSON.stringify(state), Date.now());
+/**
+ * Bản tin công khai từng nằm trong bot_state (chỉ giữ ngày mới nhất) — đưa vào
+ * kho daily_public_posts rồi xoá key cũ. Chạy một lần sau khi lên bản mới để
+ * ngày hôm đó không bị soạn lại (tốn tiền model) và không bị đăng trùng.
+ */
+export function rescueFbStateToArchive(): void {
+  const raw = getBotState(LEGACY_STATE_KEY);
+  if (!raw) return;
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      dayLabel?: string;
+      post?: PublicPost;
+      postId?: string;
+      createdAt?: number;
+    };
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(parsed.dayLabel ?? "");
+    if (!m || !parsed.post) {
+      deleteBotState(LEGACY_STATE_KEY);
+      return;
+    }
+    const dayDate = `${m[3]}-${m[2]}-${m[1]}`;
+
+    if (!getPublicPostByDate(dayDate)) {
+      const now = parsed.createdAt || Date.now();
+      savePublicPost({
+        dayDate,
+        dayLabel: parsed.dayLabel!,
+        dayStartTs: Date.parse(`${dayDate}T00:00:00+07:00`),
+        mainCaption: parsed.post.main_caption ?? "",
+        topicsJson: JSON.stringify(parsed.post.topics ?? []),
+        model: config.deepseekModel,
+        source: "live",
+        now,
+      });
+      if (parsed.postId) setPublicPostFbId(dayDate, parsed.postId, now);
+      console.log(`[daily-fb-post] Đã cứu bản tin ngày ${parsed.dayLabel} từ bot_state vào kho.`);
+    }
+    deleteBotState(LEGACY_STATE_KEY);
+  } catch {
+    deleteBotState(LEGACY_STATE_KEY); // State hỏng thì bỏ, không chặn luồng chính.
+  }
 }
 
 function isListenerHeartbeatStale(now: number): boolean {
@@ -86,10 +121,61 @@ async function notifyTelegramBestEffort(text: string): Promise<void> {
 }
 
 /**
+ * Sinh (hoặc lấy từ cache) ảnh đã brand cho từng chủ đề, đồng thời xuất bản
+ * WebP nhẹ ra thư mục nginx serve cho bahub.vn/ban-tin.
+ *
+ * Trả về buffer PNG để đăng Facebook và topics đã gắn image_file/image_url.
+ */
+export async function renderTopicImages(
+  topics: PublicPostTopic[],
+  dayDate: string,
+  dayLabel: string,
+  version: number,
+): Promise<{
+  photos: { buf: Buffer; caption: string }[];
+  topics: PublicPostTopic[];
+  cardFallbacks: number;
+}> {
+  const cacheDir = fbCacheDir();
+  mkdirSync(cacheDir, { recursive: true });
+
+  const photos: { buf: Buffer; caption: string }[] = [];
+  const out: PublicPostTopic[] = [];
+  let cardFallbacks = 0;
+
+  for (const [i, topic] of topics.entries()) {
+    const fileName = `${dayDate}-topic-${i + 1}.png`;
+    const cacheFile = path.join(cacheDir, fileName);
+    let branded: Buffer;
+    if (existsSync(cacheFile)) {
+      branded = readFileSync(cacheFile);
+      console.log(`[daily-fb-post] Ảnh ${i + 1}/${topics.length} lấy từ cache.`);
+    } else {
+      console.log(`[daily-fb-post] Sinh ảnh ${i + 1}/${topics.length}: ${topic.title}...`);
+      const generated = await generateTopicImage(topic.image_prompt);
+      if (generated.model === "card-fallback") cardFallbacks += 1;
+      branded = await brandImage(generated.buf, i + 1, topics.length, dayLabel.slice(0, 5));
+      writeFileSync(cacheFile, branded);
+      console.log(`[daily-fb-post] Ảnh ${i + 1} xong (model ${generated.model}).`);
+    }
+
+    const imageUrl = await publishTopicImage(branded, dayDate, i + 1, version);
+    photos.push({ buf: branded, caption: topic.caption });
+    out.push({ ...topic, image_file: fileName, image_url: imageUrl ?? undefined });
+  }
+
+  return { photos, topics: out, cardFallbacks };
+}
+
+/**
  * Cron 8:00 sáng: soạn BẢN PUBLIC từ tin nhắn NGÀY HÔM TRƯỚC của GROUP_ID
  * (DeepSeek, lược tên thành viên/chuyện nội bộ), sinh tối đa 3 ảnh minh họa
  * line-art BAHUB, đăng 1 bài nhiều hình lên Facebook Page rồi gửi link qua
  * Telegram để admin bấm Share về group FB + trang cá nhân.
+ *
+ * Bản tin được lưu vào kho daily_public_posts — cùng nguồn mà lệnh `sync-posts`
+ * đẩy sang bahub.vn/ban-tin, nên web và Facebook luôn khớp nhau từng chữ.
+ * Ngày không có chủ đề nào đáng đăng: ghi kho kèm lý do, KHÔNG đăng, không lên web.
  *
  * Không có FB_PAGE_ID lẫn FB_PAGE_TOKEN = tính năng TẮT (no-op, khớp .env.example).
  * Cấu hình nửa vời → báo lỗi rõ. DRY_RUN=1 → soạn bài + sinh ảnh (có cache) nhưng
@@ -120,9 +206,15 @@ export async function runDailyFbPost(): Promise<void> {
   }
 
   try {
-    const prev = readState();
-    if (prev?.dayLabel === window.label && prev.postId) {
-      console.log(`[daily-fb-post] Bài ngày ${window.label} đã đăng (${prev.postId}) — bỏ qua.`);
+    rescueFbStateToArchive();
+
+    const prev: PublicPostRow | undefined = getPublicPostByDate(dayDate);
+    if (prev?.fb_post_id) {
+      console.log(`[daily-fb-post] Bài ngày ${window.label} đã đăng (${prev.fb_post_id}) — bỏ qua.`);
+      return;
+    }
+    if (prev && !prev.fb_post_id && parseTopics(prev.topics_json).length === 0 && prev.skipped_reason) {
+      console.log(`[daily-fb-post] Ngày ${window.label} đã kết luận không đăng: ${prev.skipped_reason}`);
       return;
     }
 
@@ -144,10 +236,11 @@ export async function runDailyFbPost(): Promise<void> {
       return;
     }
 
-    // Soạn bản public — dùng lại bản đã soạn trong state nếu chạy lại cùng ngày.
+    // Soạn bản public — dùng lại bản đã soạn trong kho nếu chạy lại cùng ngày.
     let post: PublicPost;
-    if (prev?.dayLabel === window.label && prev.post) {
-      post = prev.post;
+    const prevTopics = prev ? parseTopics(prev.topics_json) : [];
+    if (prev && prevTopics.length > 0) {
+      post = { main_caption: prev.main_caption, topics: prevTopics };
       console.log(`[daily-fb-post] Dùng lại bản public đã soạn của ngày ${window.label}.`);
     } else {
       const transcript = buildTranscript(messages);
@@ -157,34 +250,61 @@ export async function runDailyFbPost(): Promise<void> {
           `Gọi DeepSeek (${config.deepseekModel})...`,
       );
       post = await draftPublicPost(transcript.text, window.label);
-      writeState({ dayLabel: window.label, post, createdAt: Date.now() });
     }
 
-    // Sinh ảnh theo chủ đề, cache theo ngày để chạy lại không tốn tiền gọi AI lần nữa.
-    const cacheDir = path.resolve("data", "fb-cache");
-    mkdirSync(cacheDir, { recursive: true });
-    const photos: { buf: Buffer; caption: string }[] = [];
-    let cardFallbacks = 0;
-    for (const [i, topic] of post.topics.entries()) {
-      const cacheFile = path.join(cacheDir, `${dayDate}-topic-${i + 1}.png`);
-      let branded: Buffer;
-      if (existsSync(cacheFile)) {
-        branded = readFileSync(cacheFile);
-        console.log(`[daily-fb-post] Ảnh ${i + 1}/${post.topics.length} lấy từ cache.`);
-      } else {
-        console.log(`[daily-fb-post] Sinh ảnh ${i + 1}/${post.topics.length}: ${topic.title}...`);
-        const generated = await generateTopicImage(topic.image_prompt);
-        if (generated.model === "card-fallback") cardFallbacks += 1;
-        branded = await brandImage(generated.buf, i + 1, post.topics.length, window.label.slice(0, 5));
-        writeFileSync(cacheFile, branded);
-        console.log(`[daily-fb-post] Ảnh ${i + 1} xong (model ${generated.model}).`);
+    // Ngày không có gì đáng chia sẻ ra ngoài: ghi nhận rồi dừng — thà im lặng
+    // còn hơn đẩy một bài nhạt lên Page và lên bahub.vn.
+    if (post.topics.length === 0) {
+      const reason = post.skip_reason || "Không có chủ đề nào đủ giá trị.";
+      savePublicPost({
+        dayDate,
+        dayLabel: window.label,
+        dayStartTs: window.startTs,
+        mainCaption: "",
+        topicsJson: "[]",
+        skippedReason: reason,
+        model: config.deepseekModel,
+        source: "live",
+        now: Date.now(),
+      });
+      console.log(`[daily-fb-post] Ngày ${window.label} KHÔNG đăng — ${reason}`);
+      if (!config.dryRun) {
+        await notifyTelegramBestEffort(
+          `ℹ️ Bản tin ${window.label}: em không đăng vì ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`,
+        );
       }
-      photos.push({ buf: branded, caption: topic.caption });
+      return;
     }
+
+    // Lưu nội dung TRƯỚC khi sinh ảnh: sinh ảnh có thể mất vài phút và chết
+    // giữa chừng, lưu trước thì lần chạy sau không phải gọi lại DeepSeek.
+    const version = Date.now();
+    savePublicPost({
+      dayDate,
+      dayLabel: window.label,
+      dayStartTs: window.startTs,
+      mainCaption: post.main_caption,
+      topicsJson: JSON.stringify(post.topics),
+      model: config.deepseekModel,
+      source: "live",
+      now: version,
+    });
+
+    const rendered = await renderTopicImages(post.topics, dayDate, window.label, version);
+    savePublicPost({
+      dayDate,
+      dayLabel: window.label,
+      dayStartTs: window.startTs,
+      mainCaption: post.main_caption,
+      topicsJson: JSON.stringify(rendered.topics),
+      model: config.deepseekModel,
+      source: "live",
+      now: version,
+    });
 
     if (config.dryRun) {
       console.log(
-        `[daily-fb-post] DRY-RUN: sẽ đăng 1 bài ${photos.length} hình lên Page ${config.fbPageId}.\n\n` +
+        `[daily-fb-post] DRY-RUN: sẽ đăng 1 bài ${rendered.photos.length} hình lên Page ${config.fbPageId}.\n\n` +
           `${post.main_caption}\n\n${post.topics.map((t, i) => `--- Hình ${i + 1}: ${t.title} ---\n${t.caption}`).join("\n\n")}`,
       );
       return;
@@ -195,7 +315,7 @@ export async function runDailyFbPost(): Promise<void> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= POST_ATTEMPTS; attempt += 1) {
       try {
-        postId = await postMultiPhoto(post.main_caption, photos);
+        postId = await postMultiPhoto(post.main_caption, rendered.photos);
         break;
       } catch (e) {
         lastError = e;
@@ -218,12 +338,12 @@ export async function runDailyFbPost(): Promise<void> {
       throw new Error(`Đăng FB thất bại sau ${POST_ATTEMPTS} lần: ${String(lastError)}`);
     }
 
-    writeState({ dayLabel: window.label, post, postId, createdAt: prev?.createdAt ?? Date.now() });
+    setPublicPostFbId(dayDate, postId, Date.now());
     console.log(`[daily-fb-post] Đã đăng bài ngày ${window.label}: ${postId}`);
 
     const cardNote =
-      cardFallbacks > 0
-        ? `\n(Lưu ý: ${cardFallbacks} hình dùng ảnh card mẫu vì dịch vụ sinh ảnh lỗi — kiểm tra số dư/API.)`
+      rendered.cardFallbacks > 0
+        ? `\n(Lưu ý: ${rendered.cardFallbacks} hình dùng ảnh card mẫu vì dịch vụ sinh ảnh lỗi — kiểm tra số dư/API.)`
         : "";
     await notifyTelegramBestEffort(
       `✅ Bản tin FB ${window.label} đã lên Page: https://www.facebook.com/${postId}. ` +

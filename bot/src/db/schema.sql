@@ -254,6 +254,34 @@ CREATE TABLE IF NOT EXISTS daily_summaries (
 
 CREATE INDEX IF NOT EXISTS idx_daily_summaries_day_start ON daily_summaries(day_start_ts);
 
+-- Kho BẢN TIN CÔNG KHAI hằng ngày: bản đã lược tên thành viên và chuyện nội bộ,
+-- dùng để đăng Facebook Page VÀ hiển thị ở bahub.vn/ban-tin. Khác hẳn
+-- daily_summaries (bản nội bộ đầy đủ, chỉ gửi trong group Zalo) — chỉ bảng này
+-- mới được đẩy ra ngoài.
+--
+-- topics_json: [{title, caption, image_prompt, image_file, image_url}] — tối đa
+-- 3 chủ đề, ĐƯỢC PHÉP rỗng khi ngày đó không có nội dung nào đáng đăng
+-- (skipped_reason ghi lý do). Ngày topics rỗng không đăng FB và không lên web.
+-- source: 'live' (cron daily-fb-post) | 'backfill' (lệnh backfill-fb-posts).
+CREATE TABLE IF NOT EXISTS daily_public_posts (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  day_date       TEXT NOT NULL,      -- 'YYYY-MM-DD' theo giờ VN (khoá nghiệp vụ)
+  day_label      TEXT NOT NULL,      -- 'dd/mm/yyyy'
+  day_start_ts   INTEGER NOT NULL,   -- epoch ms 00:00 giờ VN
+  main_caption   TEXT NOT NULL DEFAULT '',
+  topics_json    TEXT NOT NULL DEFAULT '[]',
+  fb_post_id     TEXT,               -- id bài trên Page, NULL = chưa đăng
+  fb_posted_at   INTEGER,
+  skipped_reason TEXT,               -- lý do ngày này không có bản tin
+  model          TEXT NOT NULL DEFAULT '',
+  source         TEXT NOT NULL DEFAULT 'live',
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  UNIQUE (day_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_daily_public_posts_updated ON daily_public_posts(updated_at);
+
 -- Trạng thái bot dạng key-value (warmup start, kỳ-đầu-đã-bỏ-qua...).
 CREATE TABLE IF NOT EXISTS bot_state (
   key        TEXT PRIMARY KEY,

@@ -147,6 +147,22 @@ export const config = {
   fbImageModel: process.env.FB_IMAGE_MODEL?.trim() || "",
 
   /**
+   * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho
+   * bahub.vn/ban-tin. Mặc định ./data/public/bt — trên VPS `data` là symlink
+   * sang /var/lib/bot-member-zalo nên file nằm ngoài thư mục release, deploy
+   * mới KHÔNG xoá mất ảnh cũ.
+   */
+  bulletinImageDir: process.env.BULLETIN_IMAGE_DIR?.trim() || "./data/public/bt",
+
+  /**
+   * Base URL công khai trỏ vào thư mục trên (vd https://bot.bahub.vn/bt).
+   * RỖNG = không xuất ảnh ra web: bản tin vẫn đăng Facebook và vẫn sync sang
+   * bahub.vn, chỉ là card không có ảnh — chưa cấu hình nginx thì đây là mặc
+   * định đúng, không được đoán bừa một URL rồi đẩy link ảnh vỡ lên trang.
+   */
+  bulletinImageBaseUrl: (process.env.BULLETIN_IMAGE_BASE_URL?.trim() || "").replace(/\/+$/, ""),
+
+  /**
    * Số tin nhắn Zalo tối đa cho một bản tóm tắt (1-9). Số tin thực tế tự co
    * giãn theo nội dung; tăng số này = ngày sôi động được tóm tắt chi tiết hơn.
    */

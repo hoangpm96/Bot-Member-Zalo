@@ -10,7 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "2026-08-13-daily-summaries";
+const SCHEMA_VERSION = "2026-08-14-daily-public-posts";
 
 let db: Database.Database | null = null;
 
@@ -30,7 +30,7 @@ export function getDb(): Database.Database {
   ).run({
     version: SCHEMA_VERSION,
     appliedAt: Date.now(),
-    note: "Kho lưu vĩnh viễn bản tóm tắt hằng ngày (daily_summaries).",
+    note: "Kho bản tin công khai hằng ngày (daily_public_posts) cho Facebook + bahub.vn/ban-tin.",
   });
   return db;
 }
@@ -536,47 +536,6 @@ export function hasDailySummaryForDate(dayDate: string): boolean {
   return row !== undefined;
 }
 
-/** Dòng daily_summaries rút gọn cho lệnh sync-summaries (không lấy parts_json). */
-export interface DailySummarySyncRow {
-  day_date: string;
-  day_label: string;
-  summary_text: string;
-  total_messages: number | null;
-  included_messages: number | null;
-  unique_senders: number | null;
-  images: number | null;
-  videos: number | null;
-  top_senders_json: string;
-  model: string;
-  source: string;
-  created_at: number;
-}
-
-/**
- * Các bản tóm tắt cần đẩy lên bahub.vn: lấy ngày có created_at > mốc đã sync.
- * created_at được ghi lại mỗi lần upsert (saveDailySummary), nên ngày cũ được
- * tóm tắt lại cũng lọt vào đây. Sắp created_at tăng dần để lệnh sync ghi mốc
- * theo đúng thứ tự đã đẩy — đứt giữa chừng thì lần sau chạy tiếp, không sót.
- */
-export function listDailySummariesForSync(
-  cursor: { createdAt: number; dayDate: string },
-  limit: number,
-): DailySummarySyncRow[] {
-  // Con trỏ ghép (created_at, day_date): backfill chạy vòng lặp nhanh có thể
-  // ghi nhiều ngày trong cùng một mili-giây — chỉ so created_at là mất ngày.
-  return getDb()
-    .prepare(
-      `SELECT day_date, day_label, summary_text, total_messages, included_messages,
-              unique_senders, images, videos, top_senders_json, model, source, created_at
-         FROM daily_summaries
-        WHERE created_at > @createdAt
-           OR (created_at = @createdAt AND day_date > @dayDate)
-        ORDER BY created_at ASC, day_date ASC
-        LIMIT @limit`,
-    )
-    .all({ createdAt: cursor.createdAt, dayDate: cursor.dayDate, limit }) as DailySummarySyncRow[];
-}
-
 /** Mốc ts của tin nhắn thành viên đầu tiên trong kho — điểm bắt đầu quét backfill. */
 export function getEarliestGroupMessageTs(threadId: string): number | null {
   const row = getDb()
@@ -585,6 +544,136 @@ export function getEarliestGroupMessageTs(threadId: string): number | null {
     )
     .get({ threadId }) as { t: number | null };
   return row.t ?? null;
+}
+
+// ---- Bản tin công khai hằng ngày (Facebook Page + bahub.vn/ban-tin) ----
+
+export interface PublicPostRow {
+  day_date: string;
+  day_label: string;
+  day_start_ts: number;
+  main_caption: string;
+  topics_json: string;
+  fb_post_id: string | null;
+  fb_posted_at: number | null;
+  skipped_reason: string | null;
+  model: string;
+  source: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface PublicPostInput {
+  dayDate: string;
+  dayLabel: string;
+  dayStartTs: number;
+  mainCaption: string;
+  /** JSON array [{title, caption, image_prompt, image_file, image_url}] — rỗng = ngày không có bản tin. */
+  topicsJson: string;
+  skippedReason?: string | null;
+  model?: string;
+  source?: "live" | "backfill";
+  now: number;
+}
+
+/**
+ * Lưu bản tin công khai của 1 ngày (upsert theo day_date).
+ *
+ * KHÔNG đụng fb_post_id: soạn lại nội dung không có nghĩa là bài trên Page biến
+ * mất — giữ id để lần chạy sau vẫn biết ngày này đã đăng rồi.
+ * created_at giữ nguyên lần đầu; updated_at là con trỏ cho lệnh sync-posts.
+ */
+export function savePublicPost(input: PublicPostInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO daily_public_posts
+         (day_date, day_label, day_start_ts, main_caption, topics_json,
+          skipped_reason, model, source, created_at, updated_at)
+       VALUES
+         (@dayDate, @dayLabel, @dayStartTs, @mainCaption, @topicsJson,
+          @skippedReason, @model, @source, @now, @now)
+       ON CONFLICT(day_date) DO UPDATE SET
+         day_label = @dayLabel,
+         day_start_ts = @dayStartTs,
+         main_caption = @mainCaption,
+         topics_json = @topicsJson,
+         skipped_reason = @skippedReason,
+         model = @model,
+         source = @source,
+         updated_at = @now`,
+    )
+    .run({
+      dayDate: input.dayDate,
+      dayLabel: input.dayLabel,
+      dayStartTs: input.dayStartTs,
+      mainCaption: input.mainCaption,
+      topicsJson: input.topicsJson,
+      skippedReason: input.skippedReason ?? null,
+      model: input.model ?? "",
+      source: input.source ?? "live",
+      now: input.now,
+    });
+}
+
+export function getPublicPostByDate(dayDate: string): PublicPostRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM daily_public_posts WHERE day_date = @dayDate`)
+    .get({ dayDate }) as PublicPostRow | undefined;
+}
+
+/** Ghi id bài Facebook sau khi đăng thành công (chống đăng trùng khi cron chạy lại). */
+export function setPublicPostFbId(dayDate: string, fbPostId: string, now: number): void {
+  getDb()
+    .prepare(
+      `UPDATE daily_public_posts
+          SET fb_post_id = @fbPostId, fb_posted_at = @now, updated_at = @now
+        WHERE day_date = @dayDate`,
+    )
+    .run({ dayDate, fbPostId, now });
+}
+
+/**
+ * Ghi lại topics_json sau khi đã có URL ảnh công khai.
+ *
+ * KHÔNG chạm updated_at: con trỏ sync chỉ nên nhích khi NỘI DUNG đổi. Lệnh
+ * sync-posts tự gọi hàm này ngay trước lúc đẩy, nhích con trỏ ở đây sẽ khiến
+ * chính nó thấy dòng "mới" và đẩy lại vòng sau, lặp vô tận.
+ */
+export function updatePublicPostTopics(dayDate: string, topicsJson: string): void {
+  getDb()
+    .prepare(`UPDATE daily_public_posts SET topics_json = @topicsJson WHERE day_date = @dayDate`)
+    .run({ dayDate, topicsJson });
+}
+
+/**
+ * Các bản tin công khai cần đẩy lên bahub.vn, cũ → mới theo con trỏ ghép
+ * (updated_at, day_date): backfill chạy vòng lặp nhanh có thể ghi nhiều ngày
+ * trong cùng một mili-giây — chỉ so updated_at là mất ngày.
+ *
+ * Ngày topics rỗng (không đủ nội dung đáng đăng) VẪN nằm trong kết quả: web
+ * cần biết để gỡ ngày đó xuống nếu trước đó đã trót đăng.
+ */
+export function listPublicPostsForSync(
+  cursor: { updatedAt: number; dayDate: string },
+  limit: number,
+): PublicPostRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM daily_public_posts
+        WHERE updated_at > @updatedAt
+           OR (updated_at = @updatedAt AND day_date > @dayDate)
+        ORDER BY updated_at ASC, day_date ASC
+        LIMIT @limit`,
+    )
+    .all({ updatedAt: cursor.updatedAt, dayDate: cursor.dayDate, limit }) as PublicPostRow[];
+}
+
+/** Ngày đã có bản tin công khai chưa — backfill check trước khi tốn tiền gọi model/sinh ảnh. */
+export function hasPublicPostForDate(dayDate: string): boolean {
+  const row = getDb()
+    .prepare(`SELECT 1 AS ok FROM daily_public_posts WHERE day_date = @dayDate`)
+    .get({ dayDate }) as { ok: number } | undefined;
+  return row !== undefined;
 }
 
 // ---- Reads cho ranking / export ----
