@@ -215,10 +215,23 @@ export const config = {
   /** Cho phép dò danh sách proxy công cộng miễn phí khi mọi đường trả phí đều hỏng. */
   jobFbFreeProxyEnabled: readBool("JOB_FB_FREE_PROXY_ENABLED", true),
 
-  /** Nguồn danh sách proxy miễn phí (mỗi dòng host:port). Mặc định cập nhật mỗi giờ. */
-  jobFbFreeProxyUrl:
+  /**
+   * Nguồn danh sách proxy miễn phí (mỗi dòng host:port), nhiều nguồn ngăn nhau
+   * bằng dấu phẩy.
+   *
+   * Cố ý để MẶC ĐỊNH HAI NGUỒN: đây là danh sách do người ngoài duy trì, một
+   * repo ngừng cập nhật hay đổi định dạng là nguồn Facebook đứng im lặng cho
+   * tới khi có người để ý trang không có tin mới. Hai nguồn độc lập thì một cái
+   * chết vẫn còn cái kia.
+   */
+  jobFbFreeProxyUrls: (
     process.env.JOB_FB_FREE_PROXY_URL?.trim() ||
-    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt," +
+      "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt"
+  )
+    .split(",")
+    .map((url) => url.trim())
+    .filter(Boolean),
 
   /**
    * Trần số proxy miễn phí được dò mỗi lần chạy. Đo thực tế ~4/60 con đọc được

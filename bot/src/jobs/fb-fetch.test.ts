@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   buildRouteOrder,
   isGroupFeedHtml,
+  mergeBySourcePriority,
   parseProxyEntry,
   parseProxyList,
   STORY_DELIM,
@@ -51,6 +52,34 @@ test("bóc danh sách nhiều dòng, bỏ trùng", () => {
   assert.deepEqual(list, [
     "http://1.2.3.4:8080",
     "http://5.6.7.8:3128",
+    "http://9.9.9.9:80",
+  ]);
+});
+
+test("nguồn khai trước được dò trước — pool tốt không bị pool kém pha loãng", () => {
+  const nguonTot = ["http://1.1.1.1:80", "http://2.2.2.2:80"];
+  const nguonKem = ["http://8.8.8.8:80", "http://9.9.9.9:80"];
+  assert.deepEqual(mergeBySourcePriority([nguonTot, nguonKem]), [
+    "http://1.1.1.1:80",
+    "http://2.2.2.2:80",
+    "http://8.8.8.8:80",
+    "http://9.9.9.9:80",
+  ]);
+});
+
+test("proxy có ở cả hai nguồn chỉ được thử một lần, giữ vị trí của nguồn trước", () => {
+  const a = ["http://1.1.1.1:80", "http://5.5.5.5:80"];
+  const b = ["http://5.5.5.5:80", "http://9.9.9.9:80"];
+  assert.deepEqual(mergeBySourcePriority([a, b]), [
+    "http://1.1.1.1:80",
+    "http://5.5.5.5:80",
+    "http://9.9.9.9:80",
+  ]);
+});
+
+test("nguồn tải hỏng (danh sách rỗng) không cản các nguồn còn lại", () => {
+  const nguonChet: string[] = [];
+  assert.deepEqual(mergeBySourcePriority([nguonChet, ["http://9.9.9.9:80"]]), [
     "http://9.9.9.9:80",
   ]);
 });

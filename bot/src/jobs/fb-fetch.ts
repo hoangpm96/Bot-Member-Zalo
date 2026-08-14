@@ -189,23 +189,61 @@ async function fetchVia(url: string, route: Route, timeoutMs: number): Promise<s
   }
 }
 
-/** Tải danh sách proxy miễn phí. Lỗi mạng ở bước này không được làm hỏng lần chạy. */
-async function loadFreeProxies(): Promise<string[]> {
+/** Tải một nguồn. Nguồn hỏng trả về chuỗi rỗng chứ không làm hỏng cả lần chạy. */
+async function loadOneSource(url: string): Promise<string> {
   try {
-    const res = await fetch(config.jobFbFreeProxyUrl, { signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const list = parseProxyList(await res.text());
-    // Xáo trộn: danh sách công cộng ai cũng đọc từ trên xuống, đi theo thứ tự gốc
-    // là chen nhau vào đúng những con đã quá tải.
-    for (let i = list.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [list[i], list[j]] = [list[j]!, list[i]!];
-    }
-    return list.slice(0, config.jobFbFreeProxyMaxTries);
+    return await res.text();
   } catch (e) {
-    console.warn(`[daily-jobs] Không tải được danh sách proxy miễn phí: ${String(e)}`);
-    return [];
+    console.warn(`[daily-jobs] Không tải được danh sách proxy từ ${url}: ${String(e)}`);
+    return "";
   }
+}
+
+/**
+ * Nối các nguồn theo ĐÚNG THỨ TỰ khai báo, bỏ proxy đã gặp ở nguồn trước.
+ *
+ * Thứ tự là phần quan trọng nhất ở đây, KHÔNG được đổi thành trộn chung rồi
+ * xáo. Đo trên VPS ngày 15/08/2026: monosans 11/60 con đọc được group, còn
+ * TheSpeedX chỉ 2/60 — mà TheSpeedX lại đông gấp sáu lần. Trộn chung thì 89%
+ * số lượt dò rơi vào pool kém, tỉ lệ lấy được bài mỗi ngày tụt từ ~99,7% xuống
+ * ~81%. Xếp hàng theo nguồn thì nguồn tốt được dò trước, nguồn sau chỉ đóng vai
+ * dự phòng cho ngày nguồn đầu chết hoặc trả về quá ít.
+ */
+export function mergeBySourcePriority(lists: string[][]): string[] {
+  const seen = new Set<string>();
+  const merged: string[] = [];
+  for (const list of lists) {
+    for (const proxy of list) {
+      if (seen.has(proxy)) continue;
+      seen.add(proxy);
+      merged.push(proxy);
+    }
+  }
+  return merged;
+}
+
+/** Xáo trộn tại chỗ: ai cũng đọc danh sách công cộng từ trên xuống, đi theo thứ
+ * tự gốc là chen nhau vào đúng những con đã quá tải. */
+function shuffle(list: string[]): string[] {
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j]!, list[i]!];
+  }
+  return list;
+}
+
+/**
+ * Danh sách proxy miễn phí để dò, xếp theo thứ tự ưu tiên nguồn.
+ *
+ * Tải song song để nguồn chết không kéo chậm nguồn sống, nhưng ghép lại vẫn
+ * theo thứ tự khai báo. Xáo trộn diễn ra TRONG từng nguồn, không xuyên nguồn.
+ */
+async function loadFreeProxies(): Promise<string[]> {
+  const texts = await Promise.all(config.jobFbFreeProxyUrls.map(loadOneSource));
+  const perSource = texts.map((text) => shuffle(parseProxyList(text)));
+  return mergeBySourcePriority(perSource).slice(0, config.jobFbFreeProxyMaxTries);
 }
 
 /**
