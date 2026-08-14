@@ -24,6 +24,35 @@ test("gạt chuyện phiếm trong nhóm", () => {
   assert.equal(looksLikeJobPost("Hôm nay trời đẹp quá mọi người ơi, cuối tuần vui vẻ"), false);
 });
 
+/**
+ * Tin thật lấy nguyên văn từ topic tuyển dụng Telegram của nhóm.
+ *
+ * Bản đầu của cổng lọc chặn nhầm cái thứ nhất: nó viết tắt "kn" thay vì "kinh
+ * nghiệm" và nói "tìm 1 bạn" thay vì "tuyển", nên không trúng từ khoá nào. Giữ
+ * nguyên văn ở đây để lần sau ai siết danh sách tín hiệu thì test đỏ ngay, thay
+ * vì phải phát hiện bằng mắt khi trang tuyển dụng trống trơn.
+ */
+test("tin ngắn viết kiểu nói chuyện vẫn phải lọt qua cổng", () => {
+  assert.equal(
+    looksLikeJobPost(
+      "Mình tìm 1 bạn BA từ 3-4 năm kn, tiếng Anh đọc hiểu. Có kn về mảng mobile app " +
+        "hoặc high traffic. Làm việc ở Đống Đa, HN.",
+    ),
+    true,
+  );
+  assert.equal(
+    looksLikeJobPost(
+      "🚀 [TUYỂN DỤNG GẤP] BUSINESS ANALYST_ CẦU GIẤY HÀ NỘI Team chúng mình đang tìm " +
+        "kiếm 3 Business Analyst để đồng hành cùng các dự án mới trong năm 2026.",
+    ),
+    true,
+  );
+  assert.equal(
+    looksLikeJobPost("hiện bên mình đang tuyển BA Fintech từ 2 năm kn & tiếng anh tốt"),
+    true,
+  );
+});
+
 test("cụm quá ngắn bị gạt dù có từ khoá", () => {
   assert.equal(looksLikeJobPost("tuyển"), false);
   assert.equal(looksLikeJobPost("job"), false);

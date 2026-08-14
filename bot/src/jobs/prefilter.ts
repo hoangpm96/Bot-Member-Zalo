@@ -36,7 +36,18 @@ const SIGNALS = [
   "onsite", "remote", "hybrid", "full time", "fulltime", "part time", "contractor",
   // Cách liên hệ hay dùng trong tin tuyển dụng
   "gui cv", "nhan cv", "ib em", "ib minh", "inbox em", "inbox minh",
+  // Cách nói của tin ngắn, viết như đang nói chuyện — dạng hay lọt lưới nhất.
+  // "kn" là viết tắt của "kinh nghiệm", gặp nhiều hơn hẳn dạng viết đầy đủ trong
+  // nhóm chat; nó gần như không xuất hiện với nghĩa nào khác nên an toàn.
+  "kn", "business analyst", "tim nguoi", "tim ban", "dang tim", "can tim",
 ];
+
+/**
+ * Mẫu câu tuyển người mà danh sách từ khoá cố định không bắt được: "tìm 1 bạn
+ * BA", "cần thêm 2 người". Con số ở giữa làm mọi biến thể thành một chuỗi khác
+ * nhau, nên phải khớp bằng mẫu chứ không liệt kê xuể.
+ */
+const PATTERNS = [/\b(tim|can|tuyen)\s+(them\s+)?\d+\s+(ban|nguoi|em|slot)\b/];
 
 /** Bỏ dấu + hạ chữ thường để so khớp không phụ thuộc cách gõ. */
 function fold(value: string): string {
@@ -54,7 +65,8 @@ const MIN_LENGTH = 25;
 export function looksLikeJobPost(text: string): boolean {
   if (text.trim().length < MIN_LENGTH) return false;
   const folded = ` ${fold(text)} `;
-  return SIGNALS.some((signal) => folded.includes(` ${signal} `));
+  if (SIGNALS.some((signal) => folded.includes(` ${signal} `))) return true;
+  return PATTERNS.some((pattern) => pattern.test(folded));
 }
 
 /**
