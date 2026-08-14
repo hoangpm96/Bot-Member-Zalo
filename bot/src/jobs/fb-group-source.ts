@@ -78,9 +78,22 @@ export function parseFbGroupHtml(html: string, groupSlug: string): RawJobItem[] 
   return items;
 }
 
-/** Số lần thử và giãn cách khi bị Facebook chặn tạm. Chạy 1 lần/ngày nên chờ vài phút là rẻ. */
-const FETCH_ATTEMPTS = 3;
-const FETCH_RETRY_GAP_MS = [2 * 60_000, 10 * 60_000];
+/**
+ * Chỉ thử lại khi LỖI MẠNG, và chỉ một lần.
+ *
+ * Facebook có hạn mức riêng cho bề mặt /groups/: đo thực tế trên một IP dân cư
+ * thấy sau khoảng 15 request trong 10 phút là bị đá về trang đăng nhập, và sau
+ * 42 phút theo dõi (30 lần thử) VẪN CHƯA hồi. Nên thử lại khi đang bị chặn là
+ * cách nhanh nhất để đốt IP cả ngày — mất luôn những lần chạy sau, chứ không
+ * cứu được lần này.
+ *
+ * Vì vậy: gặp tường đăng nhập thì DỪNG NGAY, để lần chạy hôm sau. Chỉ lỗi mạng
+ * thoáng qua (đứt kết nối, timeout) mới đáng thử lại.
+ */
+const NETWORK_RETRY_GAP_MS = 30_000;
+
+/** Lỗi bị Facebook chặn — khác hẳn lỗi mạng, và TUYỆT ĐỐI không được thử lại. */
+class FacebookBlockedError extends Error {}
 
 /**
  * Tải HTML trang group. Tách riêng để test parse không cần mạng.
@@ -103,36 +116,34 @@ async function fetchOnce(groupSlug: string): Promise<string> {
 
   if (res.status >= 300 && res.status < 400) {
     const target = res.headers.get("location") ?? "";
-    throw new Error(
+    throw new FacebookBlockedError(
       /login/i.test(target)
         ? "Facebook đá về trang đăng nhập — IP này không được xem nội dung group khi chưa " +
-          "đăng nhập. Thường gặp với IP trung tâm dữ liệu (VPS) và không tự hết theo thời gian; " +
-          "cần đi qua proxy/dịch vụ crawl thay vì chờ."
+          "đăng nhập. Thường gặp với IP trung tâm dữ liệu (VPS), và hạn mức của bề mặt /groups/ " +
+          "đo được là KHÔNG tự hết sau ít nhất 42 phút. Không thử lại; cần đi qua proxy hoặc " +
+          "dịch vụ crawl."
         : `Facebook chuyển hướng sang ${target || "(không rõ)"}.`,
     );
   }
-  if (!res.ok) throw new Error(`Tải group Facebook lỗi: HTTP ${res.status}`);
+  // 4xx ở đây cũng là Facebook chủ động từ chối, không phải trục trặc đường truyền.
+  if (!res.ok) {
+    throw new FacebookBlockedError(`Tải group Facebook lỗi: HTTP ${res.status}`);
+  }
 
   return res.text();
 }
 
 export async function fetchFbGroupHtml(groupSlug: string): Promise<string> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt += 1) {
-    try {
-      return await fetchOnce(groupSlug);
-    } catch (e) {
-      lastError = e;
-      const gap = FETCH_RETRY_GAP_MS[attempt];
-      if (gap === undefined) break;
-      console.warn(
-        `[daily-jobs] Tải group Facebook lỗi (lần ${attempt + 1}/${FETCH_ATTEMPTS}): ${String(e)} ` +
-          `— thử lại sau ${Math.round(gap / 60_000)} phút.`,
-      );
-      await new Promise((resolve) => setTimeout(resolve, gap));
-    }
+  try {
+    return await fetchOnce(groupSlug);
+  } catch (e) {
+    if (e instanceof FacebookBlockedError) throw e;
+
+    // Tới đây chỉ còn lỗi tầng mạng (đứt kết nối, timeout, DNS) — thử đúng một lần nữa.
+    console.warn(`[daily-jobs] Lỗi mạng khi tải group Facebook: ${String(e)} — thử lại một lần.`);
+    await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_GAP_MS));
+    return fetchOnce(groupSlug);
   }
-  throw lastError;
 }
 
 /**
