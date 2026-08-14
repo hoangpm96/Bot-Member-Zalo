@@ -282,6 +282,85 @@ CREATE TABLE IF NOT EXISTS daily_public_posts (
 
 CREATE INDEX IF NOT EXISTS idx_daily_public_posts_updated ON daily_public_posts(updated_at);
 
+-- ---- Tin tuyển dụng (daily-jobs → bahub.vn/tuyen-dung) ----
+
+-- Nội dung THÔ từ ba nguồn, đã gom cụm xong nhưng CHƯA qua AI.
+-- Một dòng = một bài Facebook trọn vẹn, hoặc một cụm tin nhắn liền mạch của
+-- cùng một người trong Zalo/Telegram.
+--
+-- Vì sao lưu thô trước khi gọi AI: gọi model tốn tiền và có thể lỗi giữa chừng.
+-- Có bảng này thì chạy lại chỉ xử lý phần chưa xong, không phải đi lấy lại từ
+-- Facebook/Telegram (mà Telegram thì chỉ giữ update 24 giờ, mất là mất hẳn).
+--
+-- processed_at NULL = chờ AI. is_job là kết luận của AI: 1 tuyển dụng, 0 không
+-- phải (giữ lại để không hỏi model hai lần về cùng một bài).
+CREATE TABLE IF NOT EXISTS job_raw (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  source       TEXT NOT NULL,          -- 'facebook' | 'telegram' | 'zalo'
+  source_id    TEXT NOT NULL,          -- post id / message id đầu cụm
+  author       TEXT NOT NULL DEFAULT '',
+  source_url   TEXT,                   -- NULL với nguồn kín (group Zalo)
+  text         TEXT NOT NULL,
+  posted_at    INTEGER NOT NULL,
+  processed_at INTEGER,
+  is_job       INTEGER,
+  created_at   INTEGER NOT NULL,
+  UNIQUE (source, source_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_raw_pending ON job_raw(processed_at, posted_at);
+
+-- Tin tuyển dụng ĐÃ bóc tách, là thứ hiển thị ở bahub.vn/tuyen-dung.
+--
+-- fingerprint: khoá chống trùng chéo nguồn (công ty + vị trí + lương chuẩn hoá).
+-- Cùng một JD thường được đăng cả Facebook lẫn Zalo lẫn Telegram, và cùng một
+-- nhà tuyển dụng hay đăng lại y hệt sau vài ngày — đo trên group bahubvn thấy
+-- rõ. Trùng thì cập nhật last_seen_at và cộng thêm nguồn vào sources_json chứ
+-- KHÔNG tạo dòng mới.
+--
+-- Mọi trường nghiệp vụ đều là TEXT và luôn có mặt: thiếu thông tin thì AI điền
+-- 'N/A' chứ không để trống, nhờ vậy trang web hiển thị đều nhau.
+--
+-- risk_level: 'ok' | 'suspect' (dấu hiệu lừa đảo: đòi đặt cọc/nộp phí, việc nhẹ
+-- lương cao, không tên công ty mà lương bất thường). Tin 'suspect' KHÔNG tự đăng.
+CREATE TABLE IF NOT EXISTS job_posts (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  fingerprint     TEXT NOT NULL,
+  title           TEXT NOT NULL,
+  company         TEXT NOT NULL DEFAULT 'N/A',
+  level           TEXT NOT NULL DEFAULT 'N/A',
+  location        TEXT NOT NULL DEFAULT 'N/A',
+  work_mode       TEXT NOT NULL DEFAULT 'N/A',   -- onsite | hybrid | remote | N/A
+  salary          TEXT NOT NULL DEFAULT 'N/A',
+  employment_type TEXT NOT NULL DEFAULT 'N/A',   -- full-time | part-time | contract | intern | N/A
+  years_exp       TEXT NOT NULL DEFAULT 'N/A',
+  skills_json     TEXT NOT NULL DEFAULT '[]',
+  deadline        TEXT NOT NULL DEFAULT 'N/A',
+  contact         TEXT NOT NULL DEFAULT 'N/A',
+  summary         TEXT NOT NULL DEFAULT '',      -- 1-2 câu mô tả ngắn
+  description     TEXT NOT NULL DEFAULT '',      -- nguyên văn bài gốc, KHÔNG để AI viết lại
+  source          TEXT NOT NULL,                 -- nguồn thấy đầu tiên
+  source_id       TEXT NOT NULL,
+  source_url      TEXT,
+  author          TEXT NOT NULL DEFAULT '',
+  -- [{source, url, posted_at}] — mọi nơi tin này từng xuất hiện.
+  sources_json    TEXT NOT NULL DEFAULT '[]',
+  posted_at       INTEGER NOT NULL,              -- lần đăng ĐẦU tiên
+  last_seen_at    INTEGER NOT NULL,              -- lần đăng lại gần nhất
+  repost_count    INTEGER NOT NULL DEFAULT 0,
+  expires_at      INTEGER NOT NULL,
+  risk_level      TEXT NOT NULL DEFAULT 'ok',
+  risk_reason     TEXT,
+  model           TEXT NOT NULL DEFAULT '',
+  is_published    INTEGER NOT NULL DEFAULT 1,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL,
+  UNIQUE (fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_posts_updated ON job_posts(updated_at);
+CREATE INDEX IF NOT EXISTS idx_job_posts_posted ON job_posts(posted_at DESC);
+
 -- Trạng thái bot dạng key-value (warmup start, kỳ-đầu-đã-bỏ-qua...).
 CREATE TABLE IF NOT EXISTS bot_state (
   key        TEXT PRIMARY KEY,

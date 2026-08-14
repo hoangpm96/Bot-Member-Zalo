@@ -174,6 +174,51 @@ export const config = {
    * 0 = gửi liền nhau. Không áp dụng cho Telegram.
    */
   summaryGroupGapMinutes: Math.max(0, readInt("SUMMARY_GROUP_GAP_MINUTES", 10)),
+
+  // ---- Tin tuyển dụng (daily-jobs → bahub.vn/tuyen-dung) ----
+
+  /**
+   * Slug group Facebook CÔNG KHAI để lấy tin tuyển dụng (phần sau
+   * facebook.com/groups/). Rỗng = tắt nguồn Facebook.
+   */
+  jobFbGroupSlug: process.env.JOB_FB_GROUP_SLUG?.trim() || "",
+
+  /**
+   * User-Agent dùng khi tải trang group. Facebook chỉ trả bản server-render đầy
+   * đủ cho UA của bot công cụ tìm kiếm — UA trình duyệt chỉ được 2 bài. Đổi
+   * được ở env để không phải sửa code khi Facebook thay đổi cách phục vụ.
+   */
+  jobFbUserAgent:
+    process.env.JOB_FB_USER_AGENT?.trim() ||
+    "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+
+  /** Bot Telegram RIÊNG cho luồng tin tuyển dụng. Rỗng = tắt nguồn Telegram. */
+  jobTelegramBotToken: process.env.JOB_TELEGRAM_BOT_TOKEN?.trim() || "",
+
+  /** Chat/supergroup Telegram chứa tin tuyển dụng (vd -100...). */
+  jobTelegramChatId: process.env.JOB_TELEGRAM_CHAT_ID?.trim() || "",
+
+  /** message_thread_id của topic tuyển dụng trong forum group. Trống = nghe cả group. */
+  jobTelegramTopicId: readOptionalPositiveInt("JOB_TELEGRAM_TOPIC_ID"),
+
+  /** Lấy tin tuyển dụng từ group Zalo chính (GROUP_ID). 0 = tắt nguồn Zalo. */
+  jobZaloEnabled: readBool("JOB_ZALO_ENABLED", true),
+
+  /**
+   * Cửa sổ gom tin rời (phút): nhiều tin của CÙNG một người trong khoảng này
+   * được ghép thành một tin tuyển dụng. Zalo/Telegram hay nhắn kiểu "cần tuyển
+   * BA" rồi tin sau mới nói lương, tin sau nữa mới nói địa điểm.
+   */
+  jobClusterGapMinutes: Math.max(1, readInt("JOB_CLUSTER_GAP_MINUTES", 15)),
+
+  /** Lần chạy đầu tiên lùi lại bao nhiêu ngày để lấy tin (các lần sau đi theo con trỏ). */
+  jobLookbackDays: Math.max(1, readInt("JOB_LOOKBACK_DAYS", 7)),
+
+  /** Tin tuyển dụng tự hết hạn sau bao nhiêu ngày kể từ ngày đăng gốc. */
+  jobExpireDays: Math.max(1, readInt("JOB_EXPIRE_DAYS", 30)),
+
+  /** Trần số cụm gửi cho AI mỗi lần chạy — chặn hoá đơn model tăng đột biến. */
+  jobMaxItemsPerRun: Math.max(1, readInt("JOB_MAX_ITEMS_PER_RUN", 60)),
 } as const;
 
 export type AppConfig = typeof config;

@@ -10,7 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "2026-08-14-daily-public-posts";
+const SCHEMA_VERSION = "2026-08-14-job-posts";
 
 let db: Database.Database | null = null;
 
@@ -30,7 +30,7 @@ export function getDb(): Database.Database {
   ).run({
     version: SCHEMA_VERSION,
     appliedAt: Date.now(),
-    note: "Kho bản tin công khai hằng ngày (daily_public_posts) cho Facebook + bahub.vn/ban-tin.",
+    note: "Kho tin tuyển dụng (job_raw, job_posts) cho bahub.vn/tuyen-dung.",
   });
   return db;
 }
@@ -688,6 +688,248 @@ export function hasPublicPostForDate(dayDate: string): boolean {
     .prepare(`SELECT 1 AS ok FROM daily_public_posts WHERE day_date = @dayDate`)
     .get({ dayDate }) as { ok: number } | undefined;
   return row !== undefined;
+}
+
+// ---- Tin tuyển dụng ----
+
+export interface JobRawRow {
+  id: number;
+  source: string;
+  source_id: string;
+  author: string;
+  source_url: string | null;
+  text: string;
+  posted_at: number;
+  processed_at: number | null;
+  is_job: number | null;
+  created_at: number;
+}
+
+export interface JobRawInput {
+  source: string;
+  sourceId: string;
+  author: string;
+  sourceUrl: string | null;
+  text: string;
+  postedAt: number;
+}
+
+/**
+ * Lưu nội dung thô mới lấy về. Trả về SỐ DÒNG THỰC SỰ THÊM MỚI.
+ *
+ * Trùng (source, source_id) thì bỏ qua im lặng — bài ghim của group Facebook
+ * xuất hiện trong mọi lần lấy, và cụm Zalo/Telegram có thể được gom lại y hệt
+ * ở lần chạy sau. Bỏ qua ở tầng DB rẻ hơn nhiều so với hỏi AI lần nữa.
+ */
+export function saveJobRawBatch(items: JobRawInput[], now: number): number {
+  const stmt = getDb().prepare(
+    `INSERT OR IGNORE INTO job_raw
+       (source, source_id, author, source_url, text, posted_at, created_at)
+     VALUES (@source, @sourceId, @author, @sourceUrl, @text, @postedAt, @now)`,
+  );
+  const run = getDb().transaction((rows: JobRawInput[]) => {
+    let inserted = 0;
+    for (const row of rows) {
+      inserted += stmt.run({ ...row, now }).changes;
+    }
+    return inserted;
+  });
+  return run(items);
+}
+
+/** Các mẩu thô chưa qua AI, cũ → mới (tin cũ được xử lý trước để thứ tự đăng đúng). */
+export function listPendingJobRaw(limit: number): JobRawRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM job_raw
+        WHERE processed_at IS NULL
+        ORDER BY posted_at ASC
+        LIMIT @limit`,
+    )
+    .all({ limit }) as JobRawRow[];
+}
+
+export function markJobRawProcessed(id: number, isJob: boolean, now: number): void {
+  getDb()
+    .prepare(`UPDATE job_raw SET processed_at = @now, is_job = @isJob WHERE id = @id`)
+    .run({ id, isJob: isJob ? 1 : 0, now });
+}
+
+/**
+ * Mốc thời gian bài mới nhất đã lấy của một nguồn — con trỏ để lần sau chỉ lấy
+ * phần mới. Chưa có gì thì trả null, bên gọi tự quyết định lùi lại bao lâu.
+ */
+export function getLatestJobRawPostedAt(source: string): number | null {
+  const row = getDb()
+    .prepare(`SELECT MAX(posted_at) AS ts FROM job_raw WHERE source = @source`)
+    .get({ source }) as { ts: number | null } | undefined;
+  return row?.ts ?? null;
+}
+
+export interface JobPostRow {
+  id: number;
+  fingerprint: string;
+  title: string;
+  company: string;
+  level: string;
+  location: string;
+  work_mode: string;
+  salary: string;
+  employment_type: string;
+  years_exp: string;
+  skills_json: string;
+  deadline: string;
+  contact: string;
+  summary: string;
+  description: string;
+  source: string;
+  source_id: string;
+  source_url: string | null;
+  author: string;
+  sources_json: string;
+  posted_at: number;
+  last_seen_at: number;
+  repost_count: number;
+  expires_at: number;
+  risk_level: string;
+  risk_reason: string | null;
+  model: string;
+  is_published: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface JobPostInput {
+  fingerprint: string;
+  title: string;
+  company: string;
+  level: string;
+  location: string;
+  workMode: string;
+  salary: string;
+  employmentType: string;
+  yearsExp: string;
+  skillsJson: string;
+  deadline: string;
+  contact: string;
+  summary: string;
+  description: string;
+  source: string;
+  sourceId: string;
+  sourceUrl: string | null;
+  author: string;
+  sourcesJson: string;
+  postedAt: number;
+  expiresAt: number;
+  riskLevel: string;
+  riskReason: string | null;
+  model: string;
+  now: number;
+}
+
+export function getJobPostByFingerprint(fingerprint: string): JobPostRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM job_posts WHERE fingerprint = @fingerprint`)
+    .get({ fingerprint }) as JobPostRow | undefined;
+}
+
+/** Thêm tin tuyển dụng mới. Trùng fingerprint thì dùng markJobPostReposted thay vì hàm này. */
+export function insertJobPost(input: JobPostInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO job_posts
+         (fingerprint, title, company, level, location, work_mode, salary, employment_type,
+          years_exp, skills_json, deadline, contact, summary, description,
+          source, source_id, source_url, author, sources_json,
+          posted_at, last_seen_at, repost_count, expires_at,
+          risk_level, risk_reason, model, is_published, created_at, updated_at)
+       VALUES
+         (@fingerprint, @title, @company, @level, @location, @workMode, @salary, @employmentType,
+          @yearsExp, @skillsJson, @deadline, @contact, @summary, @description,
+          @source, @sourceId, @sourceUrl, @author, @sourcesJson,
+          @postedAt, @postedAt, 0, @expiresAt,
+          @riskLevel, @riskReason, @model, @isPublished, @now, @now)`,
+    )
+    .run({
+      ...input,
+      // Tin nghi ngờ lừa đảo vào kho nhưng KHÔNG hiện ra ngoài cho tới khi
+      // quản trị viên tự bật lên — đây là ngoại lệ duy nhất của "đăng tự động".
+      isPublished: input.riskLevel === "ok" ? 1 : 0,
+    });
+}
+
+/**
+ * Cùng một tin được đăng lại (nguồn khác hoặc chính người đó đăng lại): nhích
+ * mốc thấy gần nhất, gia hạn, gộp thêm nguồn.
+ *
+ * KHÔNG chạm is_published: ngày quản trị viên đã ẩn tay thì lần đăng lại của
+ * nhà tuyển dụng không được tự bật lại.
+ */
+export function markJobPostReposted(input: {
+  fingerprint: string;
+  sourcesJson: string;
+  lastSeenAt: number;
+  expiresAt: number;
+  now: number;
+}): void {
+  getDb()
+    .prepare(
+      `UPDATE job_posts
+          SET last_seen_at = @lastSeenAt,
+              repost_count = repost_count + 1,
+              sources_json = @sourcesJson,
+              expires_at = @expiresAt,
+              updated_at = @now
+        WHERE fingerprint = @fingerprint`,
+    )
+    .run(input);
+}
+
+/** Tin tuyển dụng cần đẩy lên bahub.vn, theo con trỏ ghép (updated_at, id). */
+export function listJobPostsForSync(
+  cursor: { updatedAt: number; id: number },
+  limit: number,
+): JobPostRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM job_posts
+        WHERE updated_at > @updatedAt
+           OR (updated_at = @updatedAt AND id > @id)
+        ORDER BY updated_at ASC, id ASC
+        LIMIT @limit`,
+    )
+    .all({ updatedAt: cursor.updatedAt, id: cursor.id, limit }) as JobPostRow[];
+}
+
+/**
+ * Tin còn hạn, mới → cũ. Dùng để so trùng: một JD đăng lại thường lệch vài chữ
+ * nên ngoài fingerprint còn phải so tương đối với các tin gần đây.
+ */
+export function listActiveJobPosts(now: number, limit = 200): JobPostRow[] {
+  return getDb()
+    .prepare(
+      `SELECT * FROM job_posts
+        WHERE expires_at > @now
+        ORDER BY last_seen_at DESC
+        LIMIT @limit`,
+    )
+    .all({ now, limit }) as JobPostRow[];
+}
+
+/**
+ * Đánh dấu tin đã hết hạn là hết hiển thị. Trả về số tin vừa bị gỡ.
+ *
+ * Trang tuyển dụng đầy tin chết là thứ giết uy tín nhanh nhất, nên bước này
+ * chạy mỗi ngày chứ không chờ ai bấm.
+ */
+export function expireJobPosts(now: number): number {
+  return getDb()
+    .prepare(
+      `UPDATE job_posts
+          SET is_published = 0, updated_at = @now
+        WHERE is_published = 1 AND expires_at <= @now`,
+    )
+    .run({ now }).changes;
 }
 
 // ---- Reads cho ranking / export ----

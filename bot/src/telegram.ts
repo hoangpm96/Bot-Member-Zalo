@@ -183,6 +183,79 @@ export async function pollTelegramUpdates(now: number): Promise<TelegramUpdate[]
   return updates.filter((u) => u.chatId === config.telegramChatId);
 }
 
+export interface TelegramInboxMessage {
+  messageId: number;
+  senderId: string;
+  senderName: string;
+  text: string;
+  ts: number;
+}
+
+/**
+ * Đọc tin nhắn thường của MỘT chat (tuỳ chọn: một topic trong forum group) bằng
+ * một bot token riêng, có con trỏ offset riêng trong bot_state.
+ *
+ * Vì sao phải token riêng: mỗi bot Telegram chỉ có MỘT hàng đợi getUpdates, và
+ * đọc xong là offset nhích, update biến mất với mọi người đọc khác. Dùng chung
+ * token với bot duyệt cleanup (pollTelegramUpdates) thì hai bên nuốt tin của
+ * nhau. Telegram cũng chỉ giữ update chưa đọc trong 24 giờ, nên hàm này phải
+ * được gọi thường xuyên chứ không chỉ một lần mỗi ngày.
+ *
+ * Bot phải đã TẮT privacy mode (BotFather → /setprivacy → Disable) rồi được
+ * kick ra add lại, nếu không Telegram sẽ không gửi tin nhắn group cho nó.
+ *
+ * Hàm này KHÔNG tự ghi con trỏ offset — nó trả `nextOffset` để bên gọi ghi SAU
+ * khi đã lưu tin vào DB. Nhích con trỏ trước mà ghi DB lỗi là mất tin vĩnh viễn.
+ */
+export async function pollTelegramInbox(input: {
+  botToken: string;
+  chatId: string;
+  topicId: number | null;
+  offsetKey: string;
+}): Promise<{ messages: TelegramInboxMessage[]; nextOffset: number | null }> {
+  assertTelegramBotToken(input.botToken);
+  const offsetRaw = getBotState(input.offsetKey);
+  const offset = offsetRaw ? Number(offsetRaw) : undefined;
+
+  const result = await telegramCall<any[]>(
+    "getUpdates",
+    { offset, timeout: 0, limit: 100, allowed_updates: ["message", "channel_post"] },
+    input.botToken,
+  );
+
+  const messages: TelegramInboxMessage[] = [];
+  let nextOffset = offset ?? 0;
+
+  for (const update of result) {
+    const updateId = Number(update?.update_id);
+    if (Number.isFinite(updateId)) nextOffset = Math.max(nextOffset, updateId + 1);
+
+    const message = update?.message ?? update?.channel_post;
+    if (!message) continue;
+    if (String(message?.chat?.id ?? "") !== input.chatId) continue;
+    if (input.topicId !== null && Number(message?.message_thread_id) !== input.topicId) continue;
+
+    // Ảnh kèm chú thích vẫn là tin tuyển dụng — lấy caption khi không có text.
+    const text = typeof message.text === "string" ? message.text : (message.caption ?? "");
+    if (typeof text !== "string" || text.trim() === "") continue;
+
+    const from = message.from ?? {};
+    const senderName = [from.first_name, from.last_name].filter(Boolean).join(" ").trim();
+    messages.push({
+      messageId: Number(message.message_id),
+      senderId: String(from.id ?? message?.sender_chat?.id ?? "unknown"),
+      senderName: senderName || String(from.username ?? ""),
+      text,
+      ts: Number(message.date) * 1000,
+    });
+  }
+
+  return {
+    messages,
+    nextOffset: nextOffset !== (offset ?? 0) ? nextOffset : null,
+  };
+}
+
 export interface TelegramDestinationInfo {
   chatId: string;
   chatTitle: string;

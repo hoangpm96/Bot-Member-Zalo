@@ -478,6 +478,15 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 | `npm run cleanup-warn`        | Cảnh báo group (DRY_RUN=1 chỉ in)                     |
 | `npm run monthly-cleanup`     | Lập danh sách / kick (DRY_RUN=1 chỉ in)               |
 | `npm run telegram-poll`       | Xử lý duyệt/huỷ/retry/timeout Telegram                |
+| `npm run daily-summary`       | Tóm tắt tin nhắn hôm qua → group Zalo/Telegram        |
+| `npm run daily-fb-post`       | Bản tin công khai + ảnh AI → đăng Facebook Page       |
+| `npm run backfill-summaries`  | Bù kho tóm tắt cho ngày quá khứ                       |
+| `npm run backfill-fb-posts`   | Bù kho bản tin công khai cho ngày quá khứ             |
+| `npm run daily-jobs`          | Gom tin tuyển dụng 3 nguồn → AI bóc tách → `job_posts` |
+| `npm run job-telegram-poll`   | Hút tin tuyển dụng từ Telegram (chạy mỗi 5 phút)      |
+| `npm run sync-leaderboard`    | Đẩy bảng xếp hạng lên Supabase → bahub.vn/leaderboard |
+| `npm run sync-posts`          | Đẩy kho bản tin lên Supabase → bahub.vn/ban-tin       |
+| `npm run sync-jobs`           | Đẩy kho tin tuyển dụng lên Supabase → bahub.vn/tuyen-dung |
 | `npm run setup-vps`           | Cài, build, start PM2, cài cron (one-shot)            |
 | `npm run install-cron`        | (Cài/cập nhật riêng) các cron job                     |
 | `npm run validate-env`        | Kiểm `.env` đủ biến trước khi setup                   |

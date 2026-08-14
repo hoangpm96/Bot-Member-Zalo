@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { config } from "./config.js";
+import { callDeepSeekJson } from "./deepseek.js";
 import { buildNamePatterns, findLeakedNames, maskNames } from "./name-scrub.js";
 
 /**
@@ -180,38 +181,6 @@ export async function draftPublicPost(transcript: string, dayLabel: string): Pro
     topics,
     skip_reason: topics.length === 0 ? parsed.skip_reason?.trim() || "Không có chủ đề nào đủ giá trị." : undefined,
   };
-}
-
-/** Gọi DeepSeek trả JSON object, dùng chung cho soạn bài và viết lại. */
-async function callDeepSeekJson(system: string, user: string, maxTokens: number): Promise<string> {
-  const resp = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    signal: AbortSignal.timeout(600_000),
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.deepseekApiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.deepseekModel,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      temperature: 0.4,
-      max_tokens: maxTokens,
-      response_format: { type: "json_object" },
-      // v4-flash mặc định reasoning — tắt kẻo reasoning ăn hết max_tokens, content rỗng.
-      thinking: { type: "disabled" },
-      stream: false,
-    }),
-  });
-  if (!resp.ok) {
-    throw new Error(`DeepSeek HTTP ${resp.status}: ${(await resp.text()).slice(0, 500)}`);
-  }
-  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("Response DeepSeek không có nội dung");
-  return content;
 }
 
 export interface ScrubResult {
