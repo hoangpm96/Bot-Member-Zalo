@@ -193,6 +193,50 @@ export const config = {
     "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
 
   /**
+   * Proxy TRẢ PHÍ để đọc group Facebook, ưu tiên dùng trước danh sách miễn phí.
+   *
+   * Cần vì Facebook chỉ phục vụ group công khai cho IP chưa bị đánh dấu, mà IP
+   * trung tâm dữ liệu của VPS gần như luôn nằm trong danh sách bị đánh dấu.
+   *
+   * Nhiều con ngăn nhau bằng dấu phẩy/xuống dòng. Nhận cả `http://user:pass@host:port`
+   * lẫn `host:port:user:pass` (kiểu Webshare xuất ra). Rỗng = bỏ qua nấc này.
+   */
+  jobFbProxies: process.env.JOB_FB_PROXIES?.trim() || "",
+
+  /**
+   * Số lần thử mỗi proxy trả phí trong một lần chạy.
+   *
+   * >1 chỉ có ý nghĩa với residential XOAY VÒNG: mỗi lần gọi là một IP thoát
+   * khác, nên gọi lại là bốc IP mới. Lần bị chặn chỉ tốn một phản hồi 302 vài
+   * trăm byte, không đáng kể so với 1 GB đã mua.
+   */
+  jobFbProxyAttempts: Math.max(1, readInt("JOB_FB_PROXY_ATTEMPTS", 3)),
+
+  /** Cho phép dò danh sách proxy công cộng miễn phí khi mọi đường trả phí đều hỏng. */
+  jobFbFreeProxyEnabled: readBool("JOB_FB_FREE_PROXY_ENABLED", true),
+
+  /** Nguồn danh sách proxy miễn phí (mỗi dòng host:port). Mặc định cập nhật mỗi giờ. */
+  jobFbFreeProxyUrl:
+    process.env.JOB_FB_FREE_PROXY_URL?.trim() ||
+    "https://raw.githubusercontent.com/monosans/proxy-list/main/proxies/http.txt",
+
+  /**
+   * Trần số proxy miễn phí được dò mỗi lần chạy. Đo thực tế ~4/60 con đọc được
+   * group, nên 30 là đủ ăn chắc mà không kéo dài lần chạy quá lâu.
+   */
+  jobFbFreeProxyMaxTries: Math.max(1, readInt("JOB_FB_FREE_PROXY_MAX_TRIES", 30)),
+
+  /**
+   * Cookie phiên đăng nhập Facebook (tuỳ chọn, mặc định TẮT).
+   *
+   * Có cookie thì tường đăng nhập biến mất kể cả trên IP bẩn, nhưng nó đặt một
+   * tài khoản vào rủi ro — chỉ dùng tài khoản phụ, và nên đi kèm proxy đúng
+   * vùng vì đăng nhập ở một nơi rồi dùng ở IP trung tâm dữ liệu là mẫu hình
+   * Facebook hay bắt checkpoint. Dạng: "c_user=...; xs=...".
+   */
+  jobFbCookie: process.env.JOB_FB_COOKIE?.trim() || "",
+
+  /**
    * Username group Telegram CÔNG KHAI chứa tin tuyển dụng (phần sau t.me/).
    * Rỗng = tắt nguồn Telegram.
    *

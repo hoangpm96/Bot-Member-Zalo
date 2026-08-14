@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { STORY_DELIM, fetchFbGroupHtml } from "./fb-fetch.js";
 import type { RawJobItem } from "./types.js";
 
 /**
@@ -9,19 +10,19 @@ import type { RawJobItem } from "./types.js";
  * đường chính thức nào để đọc feed group.
  *
  * Cách làm ở đây: gọi HTTP thường tới trang group. Group công khai nên KHÔNG
- * cần đăng nhập, KHÔNG cần cookie, KHÔNG tài khoản nào bị đặt vào rủi ro. Điều
- * kiện duy nhất là User-Agent: Facebook chỉ trả bản server-render đầy đủ (~30
- * bài, ~11 ngày) cho UA của bot công cụ tìm kiếm; UA trình duyệt chỉ được 2 bài
- * và phần còn lại nằm sau GraphQL phân trang. Đó là lý do JOB_FB_USER_AGENT mặc
+ * cần đăng nhập và mặc định KHÔNG có tài khoản nào bị đặt vào rủi ro. Điều kiện
+ * duy nhất là User-Agent: Facebook chỉ trả bản server-render đầy đủ (~30 bài,
+ * ~11 ngày) cho UA của bot công cụ tìm kiếm; UA trình duyệt chỉ được 2 bài và
+ * phần còn lại nằm sau GraphQL phân trang. Đó là lý do JOB_FB_USER_AGENT mặc
  * định là UA crawler — đây là lựa chọn có ý thức của người vận hành, ghi ra env
  * để đổi được mà không phải sửa code.
+ *
+ * Việc chọn đường ra Internet (gọi thẳng / proxy / cookie) nằm ở fb-fetch.ts —
+ * file này chỉ lo bóc nội dung.
  *
  * Nhịp gọi: 1 lần/ngày. Một lần lấy đã phủ ~11 ngày nên mất mạng vài hôm vẫn
  * bắt kịp, không cần gọi dày.
  */
-
-/** Mốc cắt chuỗi: mỗi bài trong feed là một node Story độc lập. */
-const STORY_DELIM = '{"node":{"__typename":"Story"';
 
 const RE_POST_ID = /"post_id":"(\d+)"/;
 const RE_CREATION = /"creation_time":(\d{10})/;
@@ -79,74 +80,6 @@ export function parseFbGroupHtml(html: string, groupSlug: string): RawJobItem[] 
 }
 
 /**
- * Chỉ thử lại khi LỖI MẠNG, và chỉ một lần.
- *
- * Facebook có hạn mức riêng cho bề mặt /groups/: đo thực tế trên một IP dân cư
- * thấy sau khoảng 15 request trong 10 phút là bị đá về trang đăng nhập, và sau
- * 42 phút theo dõi (30 lần thử) VẪN CHƯA hồi. Nên thử lại khi đang bị chặn là
- * cách nhanh nhất để đốt IP cả ngày — mất luôn những lần chạy sau, chứ không
- * cứu được lần này.
- *
- * Vì vậy: gặp tường đăng nhập thì DỪNG NGAY, để lần chạy hôm sau. Chỉ lỗi mạng
- * thoáng qua (đứt kết nối, timeout) mới đáng thử lại.
- */
-const NETWORK_RETRY_GAP_MS = 30_000;
-
-/** Lỗi bị Facebook chặn — khác hẳn lỗi mạng, và TUYỆT ĐỐI không được thử lại. */
-class FacebookBlockedError extends Error {}
-
-/**
- * Tải HTML trang group. Tách riêng để test parse không cần mạng.
- *
- * `redirect: "manual"` là cố ý. Khi bị chặn tạm (gọi quá dày từ một IP),
- * Facebook trả 302 về /login — mà fetch mặc định ĐI THEO redirect và trả về
- * trang đăng nhập 400KB với HTTP 200. Nuốt cái đó thì lỗi "bị chặn" hoá thành
- * "hôm nay group không có bài nào", sai hoàn toàn về bản chất.
- */
-async function fetchOnce(groupSlug: string): Promise<string> {
-  const res = await fetch(`https://www.facebook.com/groups/${groupSlug}/`, {
-    signal: AbortSignal.timeout(60_000),
-    redirect: "manual",
-    headers: {
-      "User-Agent": config.jobFbUserAgent,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "vi-VN,vi;q=0.9,en;q=0.8",
-    },
-  });
-
-  if (res.status >= 300 && res.status < 400) {
-    const target = res.headers.get("location") ?? "";
-    throw new FacebookBlockedError(
-      /login/i.test(target)
-        ? "Facebook đá về trang đăng nhập — IP này không được xem nội dung group khi chưa " +
-          "đăng nhập. Thường gặp với IP trung tâm dữ liệu (VPS), và hạn mức của bề mặt /groups/ " +
-          "đo được là KHÔNG tự hết sau ít nhất 42 phút. Không thử lại; cần đi qua proxy hoặc " +
-          "dịch vụ crawl."
-        : `Facebook chuyển hướng sang ${target || "(không rõ)"}.`,
-    );
-  }
-  // 4xx ở đây cũng là Facebook chủ động từ chối, không phải trục trặc đường truyền.
-  if (!res.ok) {
-    throw new FacebookBlockedError(`Tải group Facebook lỗi: HTTP ${res.status}`);
-  }
-
-  return res.text();
-}
-
-export async function fetchFbGroupHtml(groupSlug: string): Promise<string> {
-  try {
-    return await fetchOnce(groupSlug);
-  } catch (e) {
-    if (e instanceof FacebookBlockedError) throw e;
-
-    // Tới đây chỉ còn lỗi tầng mạng (đứt kết nối, timeout, DNS) — thử đúng một lần nữa.
-    console.warn(`[daily-jobs] Lỗi mạng khi tải group Facebook: ${String(e)} — thử lại một lần.`);
-    await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_GAP_MS));
-    return fetchOnce(groupSlug);
-  }
-}
-
-/**
  * Lấy bài mới hơn `sinceTs` từ group Facebook.
  *
  * Bài ghim (thường là bài giới thiệu group từ nhiều năm trước) luôn xuất hiện
@@ -155,17 +88,21 @@ export async function fetchFbGroupHtml(groupSlug: string): Promise<string> {
 export async function fetchFbGroupJobs(sinceTs: number): Promise<RawJobItem[]> {
   if (!config.jobFbGroupSlug) return [];
 
-  const html = await fetchFbGroupHtml(config.jobFbGroupSlug);
+  const { html, via } = await fetchFbGroupHtml(config.jobFbGroupSlug);
   const all = parseFbGroupHtml(html, config.jobFbGroupSlug);
 
   if (all.length === 0) {
-    // Lấy được HTML mà không bóc ra bài nào = Facebook đổi cấu trúc hoặc chặn.
-    // Ném lỗi để cron ghi bot_errors thay vì lặng lẽ coi như "hôm nay không có tin".
+    // fb-fetch đã bảo đảm HTML có node Story, nên tới đây mà không ra bài nào
+    // nghĩa là hình dạng JSON bên trong node đã đổi — lỗi parse, không phải bị
+    // chặn. Ném lỗi để cron ghi bot_errors thay vì lặng lẽ coi như "hôm nay
+    // không có tin".
     throw new Error(
-      `Không bóc được bài nào từ group ${config.jobFbGroupSlug} (HTML ${html.length} ký tự) — ` +
-        "nhiều khả năng Facebook đổi cấu trúc trang hoặc chặn User-Agent đang dùng.",
+      `Không bóc được bài nào từ group ${config.jobFbGroupSlug} (HTML ${html.length} ký tự, ${via}) — ` +
+        "nhiều khả năng Facebook đổi cấu trúc dữ liệu trong trang.",
     );
   }
+
+  console.log(`[daily-jobs] Group Facebook: ${all.length} bài (${via}).`);
 
   return all
     .filter((item) => item.postedAt > sinceTs)
