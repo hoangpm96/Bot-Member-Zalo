@@ -17,7 +17,12 @@ import {
   type DayWindow,
 } from "../summary.js";
 import { draftPublicPost } from "../fb-post.js";
-import { FB_POST_LOCK_KEY, parseTopics, renderTopicImages } from "./daily-fb-post.js";
+import {
+  FB_POST_LOCK_KEY,
+  parseTopics,
+  renderTopicImages,
+  rescueFbStateToArchive,
+} from "./daily-fb-post.js";
 
 /**
  * Bù kho BẢN TIN CÔNG KHAI (daily_public_posts) cho các ngày quá khứ, từ
@@ -134,6 +139,11 @@ export async function runBackfillFbPosts(): Promise<void> {
   }
 
   try {
+    // Bản tin ĐÃ ĐĂNG THẬT lên Page có thể còn nằm trong bot_state (bản trước
+    // khi có kho theo ngày). Đưa nó vào kho trước, kẻo backfill soạn lại ngày
+    // đó ra văn bản khác và web lệch hẳn với bài trên Facebook.
+    rescueFbStateToArchive();
+
     const earliest = getEarliestGroupMessageTs(config.groupId);
     if (earliest === null) {
       console.log("[backfill-fb-posts] group_messages trống — không có gì để bù.");
