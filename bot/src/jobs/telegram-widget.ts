@@ -169,15 +169,41 @@ export function widgetUrl(groupSlug: string, messageId: number): string {
   return `https://t.me/${groupSlug}/${messageId}?embed=1&mode=tme`;
 }
 
-/** Tải một tin. Trả null khi id không tồn tại — dùng để dò biên dải id. */
+/** Số lần thử lại khi lỗi mạng thoáng qua, và giãn cách giữa các lần. */
+const FETCH_ATTEMPTS = 3;
+const FETCH_RETRY_GAP_MS = [1_000, 4_000];
+
+/**
+ * Tải một tin. Trả null khi id không tồn tại — dùng để dò biên dải id.
+ *
+ * Có thử lại khi lỗi mạng: một lượt backfill là hàng nghìn request kéo dài nhiều
+ * phút, gần như chắc chắn sẽ vấp vài lần ETIMEDOUT. Không thử lại thì một cú
+ * chớp mạng giết cả lượt crawl — đã gặp đúng như vậy trên VPS.
+ *
+ * Hết lượt thử vẫn lỗi thì NÉM RA, để bên gọi tự quyết định (crawlRange đếm là
+ * hỏng và không đẩy con trỏ qua chỗ đó, thay vì âm thầm coi như id trống).
+ */
 export async function fetchWidgetMessage(
   groupSlug: string,
   messageId: number,
 ): Promise<WidgetMessage | null> {
-  const res = await fetch(widgetUrl(groupSlug, messageId), {
-    signal: AbortSignal.timeout(30_000),
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; BahubJobBot/1.0; +https://bahub.vn)" },
-  });
-  if (!res.ok) return null;
-  return parseWidgetHtml(await res.text(), groupSlug, messageId);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      const res = await fetch(widgetUrl(groupSlug, messageId), {
+        signal: AbortSignal.timeout(30_000),
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; BahubJobBot/1.0; +https://bahub.vn)" },
+      });
+      // 404 = id không tồn tại (tin đã xoá hoặc chưa tới) — không phải lỗi.
+      if (!res.ok) return null;
+      return parseWidgetHtml(await res.text(), groupSlug, messageId);
+    } catch (e) {
+      lastError = e;
+      const gap = FETCH_RETRY_GAP_MS[attempt];
+      if (gap === undefined) break;
+      await new Promise((resolve) => setTimeout(resolve, gap));
+    }
+  }
+  throw lastError;
 }

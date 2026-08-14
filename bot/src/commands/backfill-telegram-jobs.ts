@@ -66,6 +66,12 @@ export async function runBackfillTelegramJobs(argv: string[] = []): Promise<void
     `[backfill-telegram-jobs] Tải được ${result.scanned}/${total} tin, ` +
       `${result.items.length} tin thuộc topic cần lấy.`,
   );
+  if (result.failed > 0) {
+    console.warn(
+      `[backfill-telegram-jobs] ${result.failed} id tải hỏng sau khi thử lại — ` +
+        `con trỏ chỉ dừng ở id ${result.lastId} để lần chạy sau duyệt lại phần còn thiếu.`,
+    );
+  }
 
   if (dryRun) {
     for (const item of result.items.slice(0, 10)) {

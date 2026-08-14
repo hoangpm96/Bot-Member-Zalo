@@ -57,15 +57,15 @@ export async function findIdAtTime(
 
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    const probe = await firstExistingFrom(groupSlug, middle);
+    const probeId = await firstExistingFrom(groupSlug, middle);
 
     // Cả vùng đó trống — thu hẹp về nửa dưới thay vì kẹt vòng lặp.
-    if (probe === null) {
+    if (probeId === null) {
       high = middle;
       continue;
     }
 
-    const message = await fetchWidgetMessage(groupSlug, probe);
+    const message = await probe(groupSlug, probeId);
     if (!message) {
       high = middle;
       continue;
@@ -78,6 +78,21 @@ export async function findIdAtTime(
 }
 
 /**
+ * Tải một id cho các bước DÒ BIÊN: lỗi mạng dai dẳng coi như id trống.
+ *
+ * Ở bước dò, phân biệt "lỗi" với "trống" không giúp gì mà chỉ làm hỏng cả lượt
+ * chạy. Riêng bước duyệt thật (crawlRange) thì phải phân biệt, vì ở đó bỏ sót
+ * một id là mất tin.
+ */
+async function probe(groupSlug: string, id: number): Promise<WidgetMessage | null> {
+  try {
+    return await fetchWidgetMessage(groupSlug, id);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Có tin nào trong [id, id + MISS_STREAK_END) không — trả về id thật gần nhất.
  *
  * Cần cửa sổ chứ không hỏi từng id vì tin bị xoá để lại lỗ trống; hỏi đúng một
@@ -85,9 +100,7 @@ export async function findIdAtTime(
  */
 async function firstExistingFrom(groupSlug: string, id: number): Promise<number | null> {
   const window = Array.from({ length: MISS_STREAK_END }, (_, i) => id + i);
-  const found = await mapPool(window, CONCURRENCY, (probe) =>
-    fetchWidgetMessage(groupSlug, probe),
-  );
+  const found = await mapPool(window, CONCURRENCY, (id) => probe(groupSlug, id));
   const hit = found.findIndex((message) => message !== null);
   return hit === -1 ? null : window[hit]!;
 }
@@ -121,7 +134,7 @@ export async function findLatestId(groupSlug: string, fromId: number): Promise<n
 
   // Giai đoạn 3: quét nốt phần đuôi ngắn để lấy đúng id cuối cùng.
   const tail = Array.from({ length: MISS_STREAK_END * 2 }, (_, i) => low + i);
-  const found = await mapPool(tail, CONCURRENCY, (id) => fetchWidgetMessage(groupSlug, id));
+  const found = await mapPool(tail, CONCURRENCY, (id) => probe(groupSlug, id));
   for (let i = found.length - 1; i >= 0; i -= 1) {
     if (found[i]) return tail[i]!;
   }
@@ -130,9 +143,16 @@ export async function findLatestId(groupSlug: string, fromId: number): Promise<n
 
 export interface CrawlResult {
   items: RawJobItem[];
-  /** Id lớn nhất đã duyệt — lưu lại để lần sau đi tiếp, không duyệt lại. */
+  /**
+   * Id lớn nhất ĐÃ DUYỆT TRỌN VẸN — lưu lại để lần sau đi tiếp.
+   *
+   * Nếu giữa dải có id tải hỏng, con trỏ chỉ dừng NGAY TRƯỚC id hỏng đầu tiên
+   * chứ không nhảy tới cuối: nhảy qua nghĩa là bỏ luôn khoảng đó vĩnh viễn.
+   */
   lastId: number;
   scanned: number;
+  /** Số id tải hỏng sau khi đã thử lại — dữ liệu của lượt này chưa đầy đủ. */
+  failed: number;
 }
 
 /**
@@ -153,17 +173,27 @@ export async function crawlRange(input: {
 
   const messages: WidgetMessage[] = [];
   let done = 0;
+  let failed = 0;
+  let firstFailedId: number | null = null;
 
   await mapPool(ids, CONCURRENCY, async (id) => {
-    const message = await fetchWidgetMessage(input.groupSlug, id);
-    if (message) messages.push(message);
+    try {
+      const message = await fetchWidgetMessage(input.groupSlug, id);
+      if (message) messages.push(message);
+    } catch {
+      // Một id hỏng KHÔNG được giết cả lượt crawl: backfill là hàng nghìn
+      // request kéo dài nhiều phút, vấp vài lỗi mạng là chuyện bình thường.
+      failed += 1;
+      if (firstFailedId === null || id < firstFailedId) firstFailedId = id;
+    }
     done += 1;
     if (done % 200 === 0) input.onProgress?.(done, ids.length);
   });
 
   return {
     items: toRawJobItems(messages, input.topicId),
-    lastId: input.toId,
+    lastId: firstFailedId === null ? input.toId : firstFailedId - 1,
     scanned: messages.length,
+    failed,
   };
 }
