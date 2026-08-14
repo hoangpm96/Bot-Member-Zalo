@@ -316,7 +316,11 @@ export async function runDailyFbPost(): Promise<void> {
       topicsJson: JSON.stringify(rendered.topics),
       model: config.deepseekModel,
       source: "live",
-      now: version,
+      // Mốc MỚI, không dùng lại `version`: con trỏ sync so (updated_at,
+      // day_date), lần sync chen vào giữa hai lần lưu này sẽ đứng đúng ở mốc
+      // đó và lần lưu sau mang cùng mốc sẽ không bao giờ được đẩy đi — ngày
+      // đó lên web vĩnh viễn thiếu ảnh.
+      now: Date.now(),
     });
 
     if (config.dryRun) {

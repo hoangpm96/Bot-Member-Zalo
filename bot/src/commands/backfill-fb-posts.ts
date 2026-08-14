@@ -218,7 +218,9 @@ export async function runBackfillFbPosts(): Promise<void> {
             topicsJson: JSON.stringify(rendered.topics),
             model: existing.model,
             source: existing.source === "live" ? "live" : "backfill",
-            now: version,
+            // Mốc lúc GHI, không phải lúc bắt đầu dựng ảnh (mất vài phút):
+            // updated_at cũ hơn con trỏ sync thì dòng này không bao giờ được đẩy.
+            now: Date.now(),
           });
           saved += 1;
           console.log(`[backfill-fb-posts] ${day.label}: đã dựng ${rendered.photos.length} ảnh cho bản tin có sẵn.`);
@@ -302,7 +304,10 @@ export async function runBackfillFbPosts(): Promise<void> {
             topicsJson: JSON.stringify(topicsOut),
             model: config.deepseekModel,
             source: "backfill",
-            now: version,
+            // Mốc MỚI chứ không dùng lại `version` của lần lưu chữ: sync chen
+            // vào giữa hai lần lưu sẽ đứng đúng ở mốc đó, lần lưu sau mang cùng
+            // mốc thì không bao giờ được đẩy — ngày đó lên web thiếu ảnh.
+            now: Date.now(),
           });
         }
 
