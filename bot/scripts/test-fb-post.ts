@@ -110,11 +110,6 @@ async function brandImage(
     .toBuffer();
 }
 
-const BEEKNOEE_BASE = "https://platform.beeknoee.com/v1";
-// Tầng fallback trên Beeknoee (async job). Lưu ý bee/gpt-image-1.5 đang lỗi 400/treo — không dùng.
-const BEEKNOEE_MODELS = ["openai/gpt-image-1.5", "gpt-image-1-mini"];
-const IMAGE_POLL_INTERVAL_MS = 10_000;
-const IMAGE_POLL_TIMEOUT_MS = 5 * 60_000;
 const FB_GRAPH = "https://graph.facebook.com/v26.0";
 
 interface RawMessage {
@@ -245,116 +240,40 @@ async function draftPublicPost(transcript: string, dayLabel: string): Promise<Pu
   return parsed;
 }
 
-interface BeeImageItem {
+interface ImageItem {
   b64_json?: string;
   url?: string;
 }
 
-/** Tải ảnh từ item kết quả Beeknoee: b64 trực tiếp hoặc URL download (cần auth, có thể là path tương đối). */
-async function fetchImageItem(item: BeeImageItem, key: string): Promise<Buffer> {
-  if (item.b64_json) return Buffer.from(item.b64_json, "base64");
-  if (item.url) {
-    const url = item.url.startsWith("http") ? item.url : `https://platform.beeknoee.com${item.url}`;
-    const img = await fetch(url, {
+/**
+ * Sinh 1 ảnh qua endpoint OpenAI-compatible cấu hình bằng env (FB_IMAGE_BASE_URL/API_KEY/MODEL,
+ * cùng cơ chế ai4ba gen-blog-images.mjs, vd api.bahub.vn + cx/gpt-5.5-image): gọi ĐỒNG BỘ,
+ * trả b64_json/url ngay. Đây là script lab nên lỗi thì ném thẳng, không rơi xuống card mẫu
+ * như bản chạy thật trong src/fb-post.ts.
+ */
+async function generateImage(prompt: string): Promise<{ buf: Buffer; model: string }> {
+  const baseUrl = env("FB_IMAGE_BASE_URL");
+  const apiKey = env("FB_IMAGE_API_KEY");
+  const model = env("FB_IMAGE_MODEL");
+  const resp = await fetch(`${baseUrl}/images/generations`, {
+    method: "POST",
+    signal: AbortSignal.timeout(300_000),
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, prompt, size: "1536x1024", n: 1 }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
+  const data = (await resp.json()) as { data?: ImageItem[] };
+  const item = data.data?.[0];
+  if (item?.b64_json) return { buf: Buffer.from(item.b64_json, "base64"), model };
+  if (item?.url) {
+    const img = await fetch(item.url, {
       signal: AbortSignal.timeout(120_000),
-      headers: { Authorization: `Bearer ${key}` },
+      headers: { Authorization: `Bearer ${apiKey}` },
     });
     if (!img.ok) throw new Error(`tải ảnh từ url HTTP ${img.status}`);
-    return Buffer.from(await img.arrayBuffer());
+    return { buf: Buffer.from(await img.arrayBuffer()), model };
   }
-  throw new Error("item kết quả không có b64_json/url");
-}
-
-/**
- * Tầng 1 — endpoint OpenAI-compatible cấu hình qua env (FB_IMAGE_BASE_URL/API_KEY/MODEL,
- * cùng cơ chế ai4ba gen-blog-images.mjs, vd api.bahub.vn + cx/gpt-5.5-image): gọi ĐỒNG BỘ,
- * trả b64_json/url ngay. Trả null nếu chưa cấu hình hoặc lỗi (để rơi xuống Beeknoee).
- */
-async function generateImagePrimary(prompt: string): Promise<{ buf: Buffer; model: string } | null> {
-  const baseUrl = process.env.FB_IMAGE_BASE_URL?.trim();
-  const apiKey = process.env.FB_IMAGE_API_KEY?.trim();
-  const model = process.env.FB_IMAGE_MODEL?.trim();
-  if (!baseUrl || !apiKey || !model) {
-    console.warn("[image] FB_IMAGE_* chưa cấu hình — bỏ qua tầng chính, dùng Beeknoee.");
-    return null;
-  }
-  try {
-    const resp = await fetch(`${baseUrl}/images/generations`, {
-      method: "POST",
-      signal: AbortSignal.timeout(300_000),
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, prompt, size: "1536x1024", n: 1 }),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-    const data = (await resp.json()) as { data?: BeeImageItem[] };
-    const item = data.data?.[0];
-    if (item?.b64_json) return { buf: Buffer.from(item.b64_json, "base64"), model };
-    if (item?.url) {
-      const img = await fetch(item.url, { signal: AbortSignal.timeout(120_000) });
-      if (!img.ok) throw new Error(`tải ảnh từ url HTTP ${img.status}`);
-      return { buf: Buffer.from(await img.arrayBuffer()), model };
-    }
-    throw new Error("response không có b64_json/url");
-  } catch (e) {
-    console.warn(`[image] Tầng chính ${model} lỗi: ${String(e).slice(0, 300)}`);
-    return null;
-  }
-}
-
-/**
- * Sinh 1 ảnh: tầng chính (env FB_IMAGE_*) trước, lỗi thì rơi xuống Beeknoee —
- * API Beeknoee BẤT ĐỒNG BỘ: submit trả job_id (PROCESSING), poll
- * GET /images/generations/{job_id} tới COMPLETED rồi download.
- */
-async function generateImage(prompt: string, key: string): Promise<{ buf: Buffer; model: string }> {
-  const primary = await generateImagePrimary(prompt);
-  if (primary) return primary;
-  for (const model of BEEKNOEE_MODELS) {
-    try {
-      const resp = await fetch(`${BEEKNOEE_BASE}/images/generations`, {
-        method: "POST",
-        signal: AbortSignal.timeout(180_000),
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model, prompt, size: "1536x1024", quality: "medium", n: 1 }),
-      });
-      if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}: ${(await resp.text()).slice(0, 300)}`);
-      }
-      const submit = (await resp.json()) as {
-        job_id?: string;
-        status?: string;
-        data?: BeeImageItem[];
-      };
-      if (submit.data?.[0]) return { buf: await fetchImageItem(submit.data[0], key), model };
-      if (!submit.job_id) throw new Error("submit không trả data lẫn job_id");
-
-      const deadline = Date.now() + IMAGE_POLL_TIMEOUT_MS;
-      for (;;) {
-        if (Date.now() > deadline) throw new Error(`job ${submit.job_id} quá ${IMAGE_POLL_TIMEOUT_MS / 1000}s chưa xong`);
-        await new Promise((r) => setTimeout(r, IMAGE_POLL_INTERVAL_MS));
-        const pollResp = await fetch(`${BEEKNOEE_BASE}/images/generations/${submit.job_id}`, {
-          signal: AbortSignal.timeout(60_000),
-          headers: { Authorization: `Bearer ${key}` },
-        });
-        if (!pollResp.ok) throw new Error(`poll HTTP ${pollResp.status}`);
-        const job = (await pollResp.json()) as {
-          status?: string;
-          error_message?: string | null;
-          data?: BeeImageItem[];
-        };
-        if (job.status === "COMPLETED") {
-          if (!job.data?.[0]) throw new Error("job COMPLETED nhưng không có data");
-          return { buf: await fetchImageItem(job.data[0], key), model };
-        }
-        if (job.status !== "PROCESSING") {
-          throw new Error(`job ${job.status}: ${job.error_message ?? "?"}`);
-        }
-      }
-    } catch (e) {
-      console.warn(`[image] Model ${model} lỗi: ${String(e).slice(0, 300)}`);
-    }
-  }
-  throw new Error("Mọi tầng sinh ảnh đều lỗi (tầng chính FB_IMAGE_* + Beeknoee)");
+  throw new Error("response không có b64_json/url");
 }
 
 /** Upload 1 ảnh unpublished lên Page, trả về media_fbid. */
@@ -400,11 +319,10 @@ async function postSaved(): Promise<void> {
 async function imagesOnly(): Promise<void> {
   const outDir = path.join(process.cwd(), "data", "fb-test");
   const post = JSON.parse(readFileSync(path.join(outDir, "post.json"), "utf8")) as PublicPost;
-  const beeKey = env("BEEKNOEE_API_KEY");
   const day = /(\d{2}\/\d{2})\/\d{4}/.exec(post.main_caption)?.[1] ?? "";
   for (const [i, t] of post.topics.entries()) {
     console.log(`[test-fb] Sinh ảnh ${i + 1}/${post.topics.length}: ${t.title}...`);
-    const { buf, model } = await generateImage(buildImagePrompt(t.image_prompt), beeKey);
+    const { buf, model } = await generateImage(buildImagePrompt(t.image_prompt));
     const branded = await brandImage(buf, i + 1, post.topics.length, day);
     const file = path.join(outDir, `topic-${i + 1}.png`);
     writeFileSync(file, branded);
@@ -470,7 +388,6 @@ async function main(): Promise<void> {
   const dryRun = process.argv.includes("--dry-run");
   if (!jsonPath) throw new Error("Cách dùng: npx tsx scripts/test-fb-post.ts <messages.json> [--dry-run|--post-saved]");
 
-  const beeKey = env("BEEKNOEE_API_KEY");
   const pageId = dryRun ? "" : env("FB_PAGE_ID");
   const pageToken = dryRun ? "" : env("FB_PAGE_TOKEN");
 
@@ -509,7 +426,7 @@ async function main(): Promise<void> {
   const images: { buf: Buffer; caption: string }[] = [];
   for (const [i, t] of post.topics.entries()) {
     console.log(`[test-fb] Sinh ảnh ${i + 1}/${post.topics.length}: ${t.title}...`);
-    const { buf, model } = await generateImage(buildImagePrompt(t.image_prompt), beeKey);
+    const { buf, model } = await generateImage(buildImagePrompt(t.image_prompt));
     const branded = await brandImage(buf, i + 1, post.topics.length, dayLabel.slice(0, 5));
     const file = path.join(outDir, `topic-${i + 1}.png`);
     writeFileSync(file, branded);

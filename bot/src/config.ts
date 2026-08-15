@@ -139,9 +139,7 @@ export const config = {
   /** Page access token KHÔNG hết hạn (lấy từ /me/accounts với user token dài hạn). */
   fbPageToken: process.env.FB_PAGE_TOKEN?.trim() || "",
 
-  /** API key Beeknoee (sk-bee-...) — tầng sinh ảnh dự phòng. Rỗng = bỏ tầng này. */
-  beeknoeeApiKey: process.env.BEEKNOEE_API_KEY?.trim() || "",
-  /** Endpoint sinh ảnh OpenAI-compatible ưu tiên (cùng cơ chế ai4ba). Rỗng = bỏ tầng này. */
+  /** Endpoint sinh ảnh OpenAI-compatible (cùng cơ chế ai4ba). Rỗng = ảnh bản tin dùng card mẫu. */
   fbImageBaseUrl: process.env.FB_IMAGE_BASE_URL?.trim() || "",
   fbImageApiKey: process.env.FB_IMAGE_API_KEY?.trim() || "",
   fbImageModel: process.env.FB_IMAGE_MODEL?.trim() || "",

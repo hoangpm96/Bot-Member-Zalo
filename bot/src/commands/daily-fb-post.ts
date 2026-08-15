@@ -27,6 +27,7 @@ import {
   brandImage,
   draftPublicPost,
   generateTopicImage,
+  looksOutOfCredit,
   postMultiPhoto,
   publishTopicImage,
   scrubMemberNames,
@@ -137,6 +138,8 @@ export async function renderTopicImages(
   photos: { buf: Buffer; caption: string }[];
   topics: PublicPostTopic[];
   cardFallbacks: number;
+  /** Lý do lỗi (đã loại trùng) của những ảnh phải dùng card mẫu — để báo admin. */
+  imageErrors: string[];
 }> {
   const cacheDir = fbCacheDir();
   mkdirSync(cacheDir, { recursive: true });
@@ -144,6 +147,7 @@ export async function renderTopicImages(
   const photos: { buf: Buffer; caption: string }[] = [];
   const out: PublicPostTopic[] = [];
   let cardFallbacks = 0;
+  const imageErrors: string[] = [];
 
   for (const [i, topic] of topics.entries()) {
     const fileName = `${dayDate}-topic-${i + 1}.png`;
@@ -155,9 +159,16 @@ export async function renderTopicImages(
     } else {
       console.log(`[daily-fb-post] Sinh ảnh ${i + 1}/${topics.length}: ${topic.title}...`);
       const generated = await generateTopicImage(topic.image_prompt);
-      if (generated.model === "card-fallback") cardFallbacks += 1;
+      const isCard = generated.model === "card-fallback";
+      if (isCard) {
+        cardFallbacks += 1;
+        const reason = generated.error ?? "không rõ lý do";
+        if (!imageErrors.includes(reason)) imageErrors.push(reason);
+      }
       branded = await brandImage(generated.buf, i + 1, topics.length, dayLabel.slice(0, 5));
-      writeFileSync(cacheFile, branded);
+      // Card mẫu KHÔNG được cache: nạp tiền/sửa endpoint xong chạy lại thì phải
+      // sinh được ảnh thật, chứ không đọc lại cái card hỏng của lần trước.
+      if (!isCard) writeFileSync(cacheFile, branded);
       console.log(`[daily-fb-post] Ảnh ${i + 1} xong (model ${generated.model}).`);
     }
 
@@ -166,7 +177,7 @@ export async function renderTopicImages(
     out.push({ ...topic, image_file: fileName, image_url: imageUrl ?? undefined });
   }
 
-  return { photos, topics: out, cardFallbacks };
+  return { photos, topics: out, cardFallbacks, imageErrors };
 }
 
 /**
@@ -323,6 +334,24 @@ export async function runDailyFbPost(): Promise<void> {
       now: Date.now(),
     });
 
+    // Ảnh AI hỏng thì bài vẫn lên bằng card mẫu — nhưng phải báo NGAY, không đợi
+    // đăng xong: đăng có thể lỗi nốt, mà lý do (hết số dư / endpoint chết) là thứ
+    // anh cần biết để đi nạp tiền rồi cho chạy lại.
+    if (rendered.cardFallbacks > 0) {
+      const reasons = rendered.imageErrors.join(" | ").slice(0, 500);
+      const msg =
+        `${rendered.cardFallbacks}/${rendered.photos.length} ảnh bản tin ${window.label} phải dùng card mẫu — ` +
+        `model ${config.fbImageModel || "(chưa cấu hình)"} lỗi: ${reasons}`;
+      console.warn(`[daily-fb-post] ${msg}`);
+      recordBotError({ source: "daily-fb-post", code: "image_fallback", message: msg });
+      if (!config.dryRun) {
+        const hint = rendered.imageErrors.some(looksOutOfCredit)
+          ? "Trông như hết số dư — anh nạp thêm cho model rồi xoá ảnh card trong data/fb-cache/ và chạy lại là có ảnh thật."
+          : "Anh kiểm tra endpoint/API key giúp em; sửa xong chạy lại lệnh là ảnh được sinh lại.";
+        await notifyTelegramBestEffort(`🖼️ ${msg}\n\n${hint}`);
+      }
+    }
+
     if (config.dryRun) {
       console.log(
         `[daily-fb-post] DRY-RUN: sẽ đăng 1 bài ${rendered.photos.length} hình lên Page ${config.fbPageId}.\n\n` +
@@ -362,10 +391,9 @@ export async function runDailyFbPost(): Promise<void> {
     setPublicPostFbId(dayDate, postId, Date.now());
     console.log(`[daily-fb-post] Đã đăng bài ngày ${window.label}: ${postId}`);
 
+    // Chuyện ảnh card mẫu đã báo riêng ở trên (kèm lý do) — đây chỉ nhắc lại một dòng.
     const cardNote =
-      rendered.cardFallbacks > 0
-        ? `\n(Lưu ý: ${rendered.cardFallbacks} hình dùng ảnh card mẫu vì dịch vụ sinh ảnh lỗi — kiểm tra số dư/API.)`
-        : "";
+      rendered.cardFallbacks > 0 ? `\n(Bài này đang dùng ${rendered.cardFallbacks} ảnh card mẫu.)` : "";
     await notifyTelegramBestEffort(
       `✅ Bản tin FB ${window.label} đã lên Page: https://www.facebook.com/${postId}. ` +
         `Anh bấm Share về group và trang cá nhân nhé.${cardNote}`,
