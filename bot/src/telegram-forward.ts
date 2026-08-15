@@ -1,5 +1,16 @@
 import { config } from "./config.js";
-import { sendTelegramMedia, sendTelegramText, type TelegramDestination } from "./telegram.js";
+import {
+  deleteTelegramMessage,
+  replaceTelegramMessageContent,
+  sendTelegramMedia,
+  sendTelegramText,
+  type TelegramDestination,
+} from "./telegram.js";
+import {
+  listPendingTelegramForwards,
+  markTelegramForwardRemoved,
+  saveTelegramForward,
+} from "./db/index.js";
 
 export interface ZaloForwardMessage {
   senderId: string;
@@ -8,7 +19,13 @@ export interface ZaloForwardMessage {
   msgType: string;
   media: { type: "image" | "video"; count: number; url: string | null } | null;
   ts: number;
+  /** Thread + id tin Zalo — để sau này tin bị thu hồi thì gỡ đúng bản sao bên Telegram. */
+  threadId?: string;
+  messageId?: string;
 }
+
+/** Nhãn thay chỗ khi Telegram không cho xoá nữa (tin quá 48 giờ). */
+const RECALLED_LABEL = "🗑 (tin đã thu hồi bên Zalo)";
 
 const TELEGRAM_TEXT_LIMIT = 4096;
 const TELEGRAM_CAPTION_LIMIT = 1024;
@@ -81,33 +98,92 @@ export function formatZaloForward(input: ZaloForwardMessage): string {
  */
 export async function forwardZaloMessageToTelegram(input: ZaloForwardMessage): Promise<void> {
   const formatted = formatZaloForward(input);
+  const remember = (tgMessageId: number | null): void => {
+    if (tgMessageId === null || !input.threadId || !input.messageId) return;
+    saveTelegramForward({
+      threadId: input.threadId,
+      zaloMessageId: input.messageId,
+      chatId: destination().chatId,
+      tgMessageId,
+      ts: input.ts,
+      now: Date.now(),
+    });
+  };
+
   if (input.media?.url) {
     try {
-      await sendTelegramMedia({
-        type: input.media.type,
-        url: input.media.url,
-        caption: truncate(formatted, TELEGRAM_CAPTION_LIMIT),
-        destination: destination(),
-        botToken: config.telegramForwardBotToken,
-        parseMode: "HTML",
-      });
+      remember(
+        await sendTelegramMedia({
+          type: input.media.type,
+          url: input.media.url,
+          caption: truncate(formatted, TELEGRAM_CAPTION_LIMIT),
+          destination: destination(),
+          botToken: config.telegramForwardBotToken,
+          parseMode: "HTML",
+        }),
+      );
     } catch (e) {
       // CDN Zalo có thể chặn Telegram hoặc media vượt giới hạn Bot API. Khi đó vẫn
       // chuyển nội dung/cảnh báo dưới dạng text thay vì làm mất toàn bộ message.
       const fallback = `${formatted}\n⚠️ Không tải được media: ${escapeTelegramHtml(String(e))}`;
-      await sendTelegramText(
-        truncate(fallback, TELEGRAM_TEXT_LIMIT),
-        destination(),
-        config.telegramForwardBotToken,
-        "HTML",
+      remember(
+        await sendTelegramText(
+          truncate(fallback, TELEGRAM_TEXT_LIMIT),
+          destination(),
+          config.telegramForwardBotToken,
+          "HTML",
+        ),
       );
     }
     return;
   }
-  await sendTelegramText(
-    truncate(formatted, TELEGRAM_TEXT_LIMIT),
-    destination(),
-    config.telegramForwardBotToken,
-    "HTML",
+  remember(
+    await sendTelegramText(
+      truncate(formatted, TELEGRAM_TEXT_LIMIT),
+      destination(),
+      config.telegramForwardBotToken,
+      "HTML",
+    ),
   );
+}
+
+/**
+ * Gỡ bản sao bên Telegram của các tin Zalo vừa bị thu hồi (hoặc bị bot kiểm duyệt xoá).
+ *
+ * Telegram chỉ cho bot xoá tin của chính nó trong vòng 48 giờ; quá hạn thì thay
+ * nội dung bằng nhãn thu hồi để người đọc không còn thấy nội dung cũ. Tin forward
+ * từ trước khi có bảng ánh xạ thì không tra được — bỏ qua, không có cách gỡ.
+ *
+ * Trả về số tin đã xoá hẳn và số tin chỉ đổi được nhãn.
+ */
+export async function removeForwardedTelegramMessages(
+  threadId: string,
+  zaloMessageIds: string[],
+): Promise<{ deleted: number; relabeled: number }> {
+  if (!isTelegramForwardConfigured()) return { deleted: 0, relabeled: 0 };
+
+  const rows = listPendingTelegramForwards(threadId, zaloMessageIds);
+  let deleted = 0;
+  let relabeled = 0;
+
+  for (const row of rows) {
+    const target = {
+      chatId: row.chat_id,
+      messageId: row.tg_message_id,
+      botToken: config.telegramForwardBotToken,
+    };
+    if (await deleteTelegramMessage(target)) {
+      deleted += 1;
+      markTelegramForwardRemoved(row.id, "deleted", Date.now());
+      continue;
+    }
+    if (await replaceTelegramMessageContent({ ...target, text: RECALLED_LABEL })) {
+      relabeled += 1;
+      markTelegramForwardRemoved(row.id, "relabeled", Date.now());
+    }
+    // Cả hai đều hỏng (tin đã bị xoá tay, bot mất quyền...) → để nguyên removed_at
+    // NULL, lần thu hồi sau của cùng tin sẽ thử lại.
+  }
+
+  return { deleted, relabeled };
 }

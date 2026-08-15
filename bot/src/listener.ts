@@ -51,6 +51,7 @@ import {
 import {
   forwardZaloMessageToTelegram,
   isTelegramForwardConfigured,
+  removeForwardedTelegramMessages,
 } from "./telegram-forward.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -253,6 +254,16 @@ async function moderateMessage(
       console.warn(`[moderation] ${msg}`);
     } finally {
       moderationInFlight.delete(input.sender);
+    }
+  }
+
+  // Tin vi phạm đã xoá khỏi group thì bản sao bên Telegram cũng phải gỡ, không thì
+  // nội dung cấm vẫn nằm đó. Lỗi ở đây không ảnh hưởng phần đã kick/ban.
+  if (deleted && isTelegramForwardConfigured()) {
+    try {
+      await removeForwardedTelegramMessages(input.threadId, [input.msgId, input.cliMsgId]);
+    } catch (e) {
+      console.warn(`[moderation] gỡ tin bên Telegram lỗi: ${String(e)}`);
     }
   }
 
@@ -559,10 +570,14 @@ export async function runListener(): Promise<void> {
   // Một queue nối tiếp giữ đúng thứ tự Zalo và tránh bắn đồng thời quá nhiều request Telegram.
   let telegramForwardQueue = Promise.resolve();
 
-  function enqueueTelegramForward(input: Parameters<typeof forwardZaloMessageToTelegram>[0]): void {
+  function enqueueTelegramTask(task: () => Promise<void>, label: string): void {
     telegramForwardQueue = telegramForwardQueue
-      .then(() => forwardZaloMessageToTelegram(input))
-      .catch((e) => console.warn(`[telegram-forward] gửi lỗi: ${String(e)}`));
+      .then(task)
+      .catch((e) => console.warn(`[telegram-forward] ${label} lỗi: ${String(e)}`));
+  }
+
+  function enqueueTelegramForward(input: Parameters<typeof forwardZaloMessageToTelegram>[0]): void {
+    enqueueTelegramTask(() => forwardZaloMessageToTelegram(input), "gửi");
   }
 
   function writeHealth(reason: string): void {
@@ -651,6 +666,9 @@ export async function runListener(): Promise<void> {
           msgType: String(payload?.data?.msgType ?? ""),
           media: media ? { ...media, url: extractMediaUrl(payload) } : null,
           ts,
+          threadId,
+          // Cùng cách sinh id với bản ghi trong kho → thu hồi tra ngược được.
+          messageId: extractMessageId(payload, sender, ts, text ?? `${media?.type}:${media?.count}`),
         });
       }
     }
@@ -719,15 +737,28 @@ export async function runListener(): Promise<void> {
         source: "undo",
         now: Date.now(),
       });
-      if (marked.messages + marked.media === 0) {
+      if (marked.messages + marked.media > 0) {
+        console.log(
+          `[listener] Đã đánh dấu tin thu hồi: ${marked.messages} tin nhắn, ${marked.media} media ` +
+            `(id=${ids.join("/")}).`,
+        );
+      } else {
         // Bình thường: tin sticker/file không lưu, hoặc tin có trước khi bot vào nhóm.
-        console.log(`[listener] Tin thu hồi (${ids.join("/")}) không có trong kho — bỏ qua.`);
-        return;
+        console.log(`[listener] Tin thu hồi (${ids.join("/")}) không có trong kho.`);
       }
-      console.log(
-        `[listener] Đã đánh dấu tin thu hồi: ${marked.messages} tin nhắn, ${marked.media} media ` +
-          `(id=${ids.join("/")}).`,
-      );
+
+      // Gỡ luôn bản sao bên Telegram. Xếp vào cùng hàng đợi với việc gửi để tin
+      // vừa forward xong mới tới lượt gỡ, không tra bảng ánh xạ khi chưa kịp ghi.
+      if (isTelegramForwardConfigured()) {
+        enqueueTelegramTask(async () => {
+          const removed = await removeForwardedTelegramMessages(threadId, ids);
+          if (removed.deleted + removed.relabeled > 0) {
+            console.log(
+              `[listener] Bên Telegram: xoá ${removed.deleted} tin, đổi nhãn ${removed.relabeled} tin.`,
+            );
+          }
+        }, "gỡ tin thu hồi");
+      }
     } catch (e) {
       console.warn(`[listener] lỗi xử lý undo: ${String(e)}`);
     }

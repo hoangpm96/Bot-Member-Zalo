@@ -65,14 +65,20 @@ async function telegramCall<T>(
   throw new Error(`Telegram ${method} lỗi sau nhiều lần thử`);
 }
 
+/** Id tin vừa gửi (để sau này sửa/xoá); null khi Telegram không trả message_id. */
+function sentMessageId(result: unknown): number | null {
+  const id = (result as { message_id?: unknown } | null)?.message_id;
+  return typeof id === "number" ? id : null;
+}
+
 export async function sendTelegramText(
   text: string,
   destination?: TelegramDestination,
   botToken = config.telegramBotToken,
   parseMode?: "HTML",
-): Promise<void> {
+): Promise<number | null> {
   if (!destination) assertTelegramAdminConfigured();
-  await telegramCall("sendMessage", {
+  const result = await telegramCall("sendMessage", {
     chat_id: destination?.chatId ?? config.telegramChatId,
     ...(destination?.messageThreadId !== undefined
       ? { message_thread_id: destination.messageThreadId }
@@ -81,6 +87,7 @@ export async function sendTelegramText(
     disable_web_page_preview: true,
     ...(parseMode ? { parse_mode: parseMode } : {}),
   }, botToken);
+  return sentMessageId(result);
 }
 
 /** Gửi media bằng URL vào chat/channel/forum topic Telegram. */
@@ -91,9 +98,9 @@ export async function sendTelegramMedia(input: {
   destination: TelegramDestination;
   botToken?: string;
   parseMode?: "HTML";
-}): Promise<void> {
+}): Promise<number | null> {
   const mediaField = input.type === "image" ? "photo" : "video";
-  await telegramCall(input.type === "image" ? "sendPhoto" : "sendVideo", {
+  const result = await telegramCall(input.type === "image" ? "sendPhoto" : "sendVideo", {
     chat_id: input.destination.chatId,
     ...(input.destination.messageThreadId !== undefined
       ? { message_thread_id: input.destination.messageThreadId }
@@ -102,6 +109,56 @@ export async function sendTelegramMedia(input: {
     caption: input.caption,
     ...(input.parseMode ? { parse_mode: input.parseMode } : {}),
   }, input.botToken ?? config.telegramBotToken);
+  return sentMessageId(result);
+}
+
+/**
+ * Xoá 1 tin do chính bot gửi. Telegram CHỈ cho xoá tin gửi dưới 48 giờ — quá hạn
+ * (hoặc tin đã bị xoá tay) API trả lỗi, ở đây nuốt và trả false để bên gọi còn
+ * chuyển sang phương án sửa nhãn thay vì đứt luồng.
+ */
+export async function deleteTelegramMessage(input: {
+  chatId: string;
+  messageId: number;
+  botToken?: string;
+}): Promise<boolean> {
+  try {
+    await telegramCall(
+      "deleteMessage",
+      { chat_id: input.chatId, message_id: input.messageId },
+      input.botToken ?? config.telegramBotToken,
+    );
+    return true;
+  } catch (e) {
+    console.warn(`[telegram] xoá tin ${input.messageId} không được: ${String(e)}`);
+    return false;
+  }
+}
+
+/**
+ * Sửa nội dung tin bot đã gửi. Tin có media thì phần chữ nằm ở caption chứ không
+ * phải text, nên thử editMessageText trước rồi rơi sang editMessageCaption.
+ */
+export async function replaceTelegramMessageContent(input: {
+  chatId: string;
+  messageId: number;
+  text: string;
+  botToken?: string;
+}): Promise<boolean> {
+  const botToken = input.botToken ?? config.telegramBotToken;
+  const base = { chat_id: input.chatId, message_id: input.messageId };
+  try {
+    await telegramCall("editMessageText", { ...base, text: input.text }, botToken);
+    return true;
+  } catch {
+    try {
+      await telegramCall("editMessageCaption", { ...base, caption: input.text }, botToken);
+      return true;
+    } catch (e) {
+      console.warn(`[telegram] sửa tin ${input.messageId} không được: ${String(e)}`);
+      return false;
+    }
+  }
 }
 
 export async function sendApprovalMessage(input: {

@@ -400,3 +400,23 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
 
 CREATE INDEX IF NOT EXISTS idx_moderation_created ON moderation_actions(created_at);
 CREATE INDEX IF NOT EXISTS idx_moderation_user ON moderation_actions(zalo_user_id);
+
+-- Ánh xạ tin Zalo → tin đã forward sang Telegram, để khi tin gốc bị thu hồi thì
+-- gỡ luôn bản sao bên Telegram. Chỉ giữ id, không giữ nội dung (nội dung đã có ở
+-- group_messages). removed_at có giá trị = đã gỡ/đổi nhãn xong, không xử lý lại.
+CREATE TABLE IF NOT EXISTS telegram_forwards (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id       TEXT NOT NULL,
+  zalo_message_id TEXT NOT NULL,
+  chat_id         TEXT NOT NULL,
+  tg_message_id   INTEGER NOT NULL,
+  ts              INTEGER NOT NULL,
+  created_at      INTEGER NOT NULL,
+  removed_at      INTEGER,
+  removed_how     TEXT NOT NULL DEFAULT '',
+  UNIQUE (chat_id, tg_message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_telegram_forwards_zalo
+  ON telegram_forwards(thread_id, zalo_message_id);
+CREATE INDEX IF NOT EXISTS idx_telegram_forwards_ts ON telegram_forwards(ts);

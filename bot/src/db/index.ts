@@ -10,7 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "2026-08-15-undo-messages";
+const SCHEMA_VERSION = "2026-08-15-telegram-forwards";
 
 let db: Database.Database | null = null;
 
@@ -31,7 +31,7 @@ export function getDb(): Database.Database {
   ).run({
     version: SCHEMA_VERSION,
     appliedAt: Date.now(),
-    note: "Đánh dấu tin thu hồi (deleted_at) để không lọt vào tóm tắt/bản tin.",
+    note: "Tin thu hồi: deleted_at ở group_messages + gỡ bản sao bên Telegram.",
   });
   return db;
 }
@@ -450,6 +450,57 @@ export function markGroupContentDeleted(input: {
       .run(input.now, input.source, input.threadId, ...ids).changes;
 
   return { messages: markOne("group_messages"), media: markOne("group_media_events") };
+}
+
+// ---- Bản sao tin Zalo bên Telegram (để gỡ khi tin gốc bị thu hồi) ----
+
+export interface TelegramForwardRow {
+  id: number;
+  zalo_message_id: string;
+  chat_id: string;
+  tg_message_id: number;
+}
+
+/** Nhớ tin vừa forward. Gửi lại cùng tin (Zalo redeliver) không sinh dòng thừa. */
+export function saveTelegramForward(input: {
+  threadId: string;
+  zaloMessageId: string;
+  chatId: string;
+  tgMessageId: number;
+  ts: number;
+  now: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO telegram_forwards
+         (thread_id, zalo_message_id, chat_id, tg_message_id, ts, created_at)
+       VALUES (@threadId, @zaloMessageId, @chatId, @tgMessageId, @ts, @now)`,
+    )
+    .run(input);
+}
+
+/** Bản sao Telegram CHƯA gỡ của các tin Zalo này. */
+export function listPendingTelegramForwards(
+  threadId: string,
+  zaloMessageIds: string[],
+): TelegramForwardRow[] {
+  const ids = [...new Set(zaloMessageIds.map((id) => String(id).trim()).filter((id) => id !== ""))];
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => "?").join(", ");
+  return getDb()
+    .prepare(
+      `SELECT id, zalo_message_id, chat_id, tg_message_id
+       FROM telegram_forwards
+       WHERE thread_id = ? AND zalo_message_id IN (${placeholders}) AND removed_at IS NULL`,
+    )
+    .all(threadId, ...ids) as TelegramForwardRow[];
+}
+
+/** Đã gỡ xong: how = 'deleted' (xoá hẳn) | 'relabeled' (quá 48h nên chỉ đổi nhãn). */
+export function markTelegramForwardRemoved(id: number, how: string, now: number): void {
+  getDb()
+    .prepare(`UPDATE telegram_forwards SET removed_at = @now, removed_how = @how WHERE id = @id`)
+    .run({ id, how, now });
 }
 
 // ---- Reads cho tóm tắt hằng ngày ----
