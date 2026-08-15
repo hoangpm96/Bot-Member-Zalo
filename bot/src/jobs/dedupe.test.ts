@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  fingerprintOf,
+  isSameJob,
   jobFingerprint,
+  jobKeys,
   mergeSources,
   normalizeKey,
   normalizeLocation,
@@ -25,6 +28,7 @@ test("lương quy về con số nên đổi cách viết vẫn khớp", () => {
 const BASE = {
   company: "N/A",
   title: "Business Analyst",
+  level: "Senior",
   salary: "Up to 35M gross",
   location: "Lê Văn Lương, Hà Nội",
   author: "Trần Bảo Thoa",
@@ -64,6 +68,57 @@ test("viết tắt vị trí quy về cùng một khoá", () => {
   assert.equal(normalizeRole("BA/PO"), normalizeRole("PO/BA"));
   assert.equal(normalizeRole("BA/PO"), "business analyst|product owner");
   assert.notEqual(normalizeRole("BA"), normalizeRole("PO"));
+});
+
+test("viết tắt nằm giữa tiêu đề cũng được mở, không chỉ khi đứng một mình", () => {
+  assert.equal(normalizeRole("BA Fintech"), "business analyst fintech");
+  assert.equal(normalizeRole("BA Leader"), "business analyst leader");
+  // "IT BA" là một cụm, không phải chữ "IT" đứng cạnh chữ "BA".
+  assert.equal(normalizeRole("IT BA"), normalizeRole("ITBA"));
+  assert.equal(normalizeRole("IT BA"), "it business analyst");
+  assert.notEqual(normalizeRole("IT BA"), normalizeRole("BA"));
+});
+
+test("cấp bậc trong tiêu đề không đẻ ra tin mới, nhưng cột level thì có", () => {
+  // "BA" và "Middle BA" là một vị trí viết hai kiểu.
+  assert.equal(normalizeRole("Middle BA"), normalizeRole("Business Analyst"));
+  assert.equal(normalizeRole("Junior-Middle Business Analyst"), "business analyst");
+  assert.equal(jobFingerprint(BASE), jobFingerprint({ ...BASE, title: "Senior BA" }));
+  // ...còn cấp bậc bóc ra được thì vẫn tách hai đợt tuyển khác nhau.
+  assert.notEqual(jobFingerprint(BASE), jobFingerprint({ ...BASE, level: "Junior" }));
+  // Lead/Manager là tên vị trí thật, không phải chữ chỉ cấp bậc để gạt đi.
+  assert.notEqual(normalizeRole("BA Leader"), normalizeRole("BA"));
+});
+
+test("đăng lại rơi rụng bớt thông tin vẫn là một tin", () => {
+  const dayOne = jobKeys(BASE);
+  // Hôm nay đăng lại: viết tắt vị trí, quên mức lương, ghi mỗi "Hà Nội".
+  const dayThree = jobKeys({
+    ...BASE,
+    title: "Senior BA",
+    level: "N/A",
+    salary: "N/A",
+    location: "Hà Nội",
+  });
+
+  assert.notEqual(fingerprintOf(dayOne), fingerprintOf(dayThree));
+  assert.ok(isSameJob(dayOne, dayThree));
+});
+
+test("trường nào cả hai bên đều nêu mà khác nhau thì là hai tin", () => {
+  const base = jobKeys(BASE);
+  assert.ok(!isSameJob(base, jobKeys({ ...BASE, salary: "Up to 25M gross" })));
+  assert.ok(!isSameJob(base, jobKeys({ ...BASE, location: "Đà Nẵng" })));
+  assert.ok(!isSameJob(base, jobKeys({ ...BASE, level: "Junior" })));
+  assert.ok(!isSameJob(base, jobKeys({ ...BASE, title: "Product Owner" })));
+  assert.ok(!isSameJob(base, jobKeys({ ...BASE, author: "HR khác" })));
+});
+
+test("không có mỏ neo nào thì không được gộp", () => {
+  // Bài giấu cả tên công ty lẫn tên người đăng: chỉ còn vị trí, không đủ để nói
+  // hai tin là một.
+  const anon = jobKeys({ ...BASE, company: "N/A", author: "" });
+  assert.ok(!isSameJob(anon, anon));
 });
 
 test("nơi làm việc quy về thành phố, bỏ chi tiết đường/quận", () => {

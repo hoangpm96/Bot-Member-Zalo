@@ -4,16 +4,26 @@ import {
   expireJobPosts,
   getJobPostByFingerprint,
   insertJobPost,
+  listActiveJobPosts,
   listPendingJobRaw,
   markJobPostReposted,
   markJobRawProcessed,
   recordBotError,
   releaseLock,
+  type JobPostRow,
   type JobRawRow,
 } from "../db/index.js";
 import { sendTelegramText } from "../telegram.js";
 import { collectRawJobs } from "../jobs/collect.js";
-import { jobFingerprint, mergeSources, normalizeLocation, parseSources } from "../jobs/dedupe.js";
+import {
+  fingerprintOf,
+  isSameJob,
+  jobKeys,
+  mergeSources,
+  normalizeLocation,
+  parseSources,
+  type JobKeys,
+} from "../jobs/dedupe.js";
 import { extractJob, type ExtractedJob } from "../jobs/extract.js";
 
 /**
@@ -79,6 +89,32 @@ export function descriptionFor(
   return job.clean_description || job.summary || raw.text;
 }
 
+/**
+ * Tin CÒN HẠN nào là cùng một tin với mẩu đang xử lý.
+ *
+ * Chạy sau khi tra chữ ký băm không thấy gì. Đây là chỗ bắt được "hôm kia đăng,
+ * hôm nay đăng lại" khi lần đăng lại lệch vài chữ — chữ ký băm đòi cả năm phần
+ * giống hệt, còn ở đây trường nào một bên bỏ trống thì bỏ qua.
+ *
+ * Chỉ so với tin còn hạn: một tin đã chết 30 ngày trước không được phép nuốt
+ * lượt đăng mới, vì đợt tuyển đó rõ ràng đã là chuyện khác.
+ */
+function findNearDuplicate(keys: JobKeys, now: number): JobPostRow | undefined {
+  return listActiveJobPosts(now).find((row) =>
+    isSameJob(
+      keys,
+      jobKeys({
+        company: row.company,
+        title: row.title,
+        level: row.level,
+        salary: row.salary,
+        location: row.location,
+        author: row.author,
+      }),
+    ),
+  );
+}
+
 /** Đưa một mẩu thô qua AI rồi ghi vào kho. Trả về việc đã làm với nó. */
 async function processRaw(
   raw: JobRawRow,
@@ -91,23 +127,29 @@ async function processRaw(
     return "rejected";
   }
 
-  const fingerprint = jobFingerprint({
+  const keys = jobKeys({
     company: job.company,
     title: job.title,
+    level: job.level,
     salary: job.salary,
     location: job.location,
     author: raw.author,
   });
+  const fingerprint = fingerprintOf(keys);
 
   const sourceRef = { source: raw.source, url: raw.source_url, posted_at: raw.posted_at };
   const expiresAt = raw.posted_at + config.jobExpireDays * 24 * 60 * 60 * 1000;
-  const existing = getJobPostByFingerprint(fingerprint);
+  const existing = getJobPostByFingerprint(fingerprint) ?? findNearDuplicate(keys, now);
 
   if (existing) {
     // Đăng lại: gia hạn và ghi nhận thêm nơi xuất hiện. KHÔNG ghi đè nội dung —
     // bản đầu tiên thường đầy đủ hơn bản đăng lại cho có.
+    //
+    // Cập nhật theo chữ ký của DÒNG ĐÃ CÓ, không phải chữ ký vừa tính: tin bắt
+    // được bằng lưới gần trùng mang chữ ký khác, ghi theo chữ ký mới là đẻ ra
+    // đúng cái dòng thứ hai vừa tránh được.
     markJobPostReposted({
-      fingerprint,
+      fingerprint: existing.fingerprint,
       sourcesJson: JSON.stringify(mergeSources(parseSources(existing.sources_json), sourceRef)),
       lastSeenAt: Math.max(existing.last_seen_at, raw.posted_at),
       expiresAt: Math.max(existing.expires_at, expiresAt),

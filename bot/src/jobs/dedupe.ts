@@ -49,26 +49,63 @@ function employerKey(company: string, author: string): string {
  * Tên vị trí về dạng so sánh được.
  *
  * Người đăng viết cùng một vị trí bằng đủ kiểu: "BA", "Business Analyst",
- * "BA/PO", "PO/BA". Không quy về một mối thì mỗi lần đăng lại là một card mới
- * trên trang — đo trên dữ liệu thật thấy đúng như vậy.
+ * "IT BA", "ITBA", "Middle BA", "BA/PO", "PO/BA". Không quy về một mối thì mỗi
+ * lần đăng lại là một card mới trên trang — đo trên dữ liệu thật thấy đúng vậy.
  */
 const ROLE_ALIASES: Record<string, string> = {
   ba: "business analyst",
+  itba: "it business analyst",
   po: "product owner",
   pm: "project manager",
   brse: "bridge system engineer",
-  "ba leader": "business analyst leader",
 };
+
+/**
+ * Cấp bậc bị gạt khỏi khoá vị trí: "BA" và "Middle BA" là cùng một vị trí viết
+ * hai kiểu, không phải hai tin. Cấp bậc đã có cột `level` riêng và cột đó là
+ * MỘT PHẦN của chữ ký, nên "Junior BA" vẫn không lẫn với "Senior BA".
+ *
+ * KHÔNG gạt "lead", "leader", "manager": đó là tên vị trí thật ("Tech Lead",
+ * "Project Manager", "BA Leader"), gạt đi là gộp nhầm hai nghề khác nhau.
+ */
+const SENIORITY_WORDS = new Set([
+  "intern",
+  "internship",
+  "fresher",
+  "junior",
+  "jr",
+  "middle",
+  "mid",
+  "senior",
+  "sr",
+]);
+
+/** Mở viết tắt ở mức TỪ, để "Middle BA" cũng ra "business analyst". */
+function roleWords(part: string): string[] {
+  // "it ba" là một cụm hai từ — ghép lại trước khi tra bảng, nếu không "ba"
+  // được mở riêng và "it" thành một từ lạc lõng đứng trước.
+  const merged = part.replace(/\bit ba\b/g, "itba");
+
+  const words: string[] = [];
+  for (const word of merged.split(" ")) {
+    if (word === "" || SENIORITY_WORDS.has(word)) continue;
+    words.push(...(ROLE_ALIASES[word] ?? word).split(" "));
+  }
+  return words;
+}
 
 export function normalizeRole(title: string): string {
   const parts = title
     .split(/[/,&+]|\bvà\b|\bhoặc\b/i)
-    .map((part) => normalizeKey(part))
-    .filter((part) => part !== "")
-    .map((part) => ROLE_ALIASES[part] ?? part);
+    .map((part) => roleWords(normalizeKey(part)).join(" "))
+    .filter((part) => part !== "");
 
   // Sắp xếp để "BA/PO" và "PO/BA" ra cùng một khoá.
-  return [...new Set(parts)].sort().join("|");
+  const role = [...new Set(parts)].sort().join("|");
+
+  // Tiêu đề chỉ có mỗi chữ chỉ cấp bậc thì gạt xong không còn gì — lùi về
+  // nguyên văn còn hơn để khoá rỗng gộp nhầm mọi tin của cùng một người đăng.
+  return role || normalizeKey(title);
 }
 
 /**
@@ -99,22 +136,68 @@ export function normalizeLocation(location: string): string {
   return norm;
 }
 
-export function jobFingerprint(input: {
+/** Các trường nhận dạng một tin, lấy thẳng từ kết quả bóc tách. */
+export interface JobIdentity {
   company: string;
   title: string;
+  level: string;
   salary: string;
   location: string;
   author: string;
-}): string {
-  const parts = [
-    employerKey(input.company, input.author),
-    normalizeRole(input.title),
-    normalizeSalary(input.salary),
-    normalizeLocation(input.location),
-  ].join("|");
+}
 
+/** Năm phần của chữ ký, đã chuẩn hoá. Rỗng = bài gốc không nêu. */
+export interface JobKeys {
+  employer: string;
+  role: string;
+  level: string;
+  salary: string;
+  location: string;
+}
+
+export function jobKeys(input: JobIdentity): JobKeys {
+  return {
+    employer: employerKey(input.company, input.author),
+    role: normalizeRole(input.title),
+    level: input.level === NA ? "" : normalizeKey(input.level),
+    salary: normalizeSalary(input.salary),
+    location: normalizeLocation(input.location),
+  };
+}
+
+export function fingerprintOf(keys: JobKeys): string {
+  const parts = [keys.employer, keys.role, keys.level, keys.salary, keys.location].join("|");
   // Băm để khoá UNIQUE trong SQLite gọn và không phụ thuộc độ dài nội dung.
   return createHash("sha1").update(parts).digest("hex").slice(0, 20);
+}
+
+export function jobFingerprint(input: JobIdentity): string {
+  return fingerprintOf(jobKeys(input));
+}
+
+/** Một phần khớp khi hai bên bằng nhau, hoặc khi một bên không nêu gì. */
+function loose(a: string, b: string): boolean {
+  return a === b || a === "" || b === "";
+}
+
+/**
+ * Lưới thứ hai của chống trùng: cùng một tin nhưng lần đăng lại lệch vài trường.
+ *
+ * Chữ ký băm chỉ khớp khi CẢ NĂM phần giống hệt, mà thực tế lần đăng lại hay
+ * rơi rụng bớt — hôm trước ghi "Up to 35M, Cầu Giấy", hôm nay chỉ còn "Tuyển BA
+ * Hà Nội, lương thoả thuận". Ở đây coi là một tin khi bên tuyển và vị trí trùng
+ * nhau, còn các trường còn lại thì hoặc trùng, hoặc BỎ TRỐNG ở một bên.
+ *
+ * Cố ý KHÔNG nới thêm: hai trường cùng có giá trị mà khác nhau (35M với 25M,
+ * Hà Nội với Đà Nẵng) là hai tin khác. Gộp nhầm thì mất hẳn một tin, còn sót
+ * thì chỉ hơi lặp — đúng nếp đã chọn cho cả tính năng này.
+ */
+export function isSameJob(a: JobKeys, b: JobKeys): boolean {
+  // Không có mỏ neo (bài giấu công ty lẫn tên người đăng, hoặc không rõ vị trí)
+  // thì không đủ cơ sở để gộp.
+  if (a.employer.length <= 2 || a.role === "") return false;
+  if (a.employer !== b.employer || a.role !== b.role) return false;
+  return loose(a.level, b.level) && loose(a.salary, b.salary) && loose(a.location, b.location);
 }
 
 export interface JobSourceRef {
