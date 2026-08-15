@@ -944,6 +944,23 @@ export function listActiveJobPosts(now: number, limit = 200): JobPostRow[] {
     .all({ now, limit }) as JobPostRow[];
 }
 
+/** Cả kho tin tuyển dụng, cũ → mới. Dùng cho lệnh vá dữ liệu, không dùng để hiển thị. */
+export function listAllJobPosts(): JobPostRow[] {
+  return getDb().prepare(`SELECT * FROM job_posts ORDER BY id ASC`).all() as JobPostRow[];
+}
+
+/**
+ * Đổi tên vị trí của một tin đã nằm trong kho.
+ *
+ * Nhích `updated_at` là cố ý: con trỏ của `sync-jobs` chạy theo cột này, nên tin
+ * vừa sửa sẽ tự được đẩy lên Supabase ở lần sync kế tiếp mà không cần `--full`.
+ */
+export function updateJobPostTitle(id: number, title: string, now: number): void {
+  getDb()
+    .prepare(`UPDATE job_posts SET title = @title, updated_at = @now WHERE id = @id`)
+    .run({ id, title, now });
+}
+
 /**
  * Đánh dấu tin đã hết hạn là hết hiển thị. Trả về số tin vừa bị gỡ.
  *

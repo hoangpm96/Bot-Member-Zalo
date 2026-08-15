@@ -18,6 +18,7 @@ import { runBackfillFbPosts } from "./commands/backfill-fb-posts.js";
 import { runDailyJobsSafe } from "./commands/daily-jobs.js";
 import { runBackfillTelegramJobs } from "./commands/backfill-telegram-jobs.js";
 import { runSyncJobs } from "./commands/sync-jobs.js";
+import { runBackfillJobTitles } from "./commands/backfill-job-titles.js";
 import { recordBotError } from "./db/index.js";
 
 /**
@@ -59,6 +60,7 @@ Cách dùng:
   npm run daily-jobs        # cron 7:30 sáng: gom tin tuyển dụng 3 nguồn → AI bóc tách → kho job_posts
   npm run backfill-telegram-jobs -- --days=30  # bù tin tuyển dụng Telegram cho N ngày quá khứ
   npm run sync-jobs         # cron: đẩy kho tin tuyển dụng lên Supabase → hiện ở bahub.vn/tuyen-dung (--full: đẩy lại hết)
+  npm run backfill-job-titles # vá một lần: mở viết tắt tên vị trí trong kho cũ (--dry-run chỉ liệt kê)
 `;
 
 async function main(): Promise<void> {
@@ -133,6 +135,9 @@ async function main(): Promise<void> {
       break;
     case "sync-jobs":
       await runSyncJobs(process.argv.slice(3));
+      break;
+    case "backfill-job-titles":
+      runBackfillJobTitles(process.argv.slice(3));
       break;
     default:
       console.log(USAGE);

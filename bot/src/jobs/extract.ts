@@ -1,4 +1,5 @@
 import { callDeepSeekJson } from "../deepseek.js";
+import { normalizeJobTitle } from "./title.js";
 
 /**
  * Lọc + bóc tách tin tuyển dụng bằng DeepSeek.
@@ -73,8 +74,12 @@ const SYSTEM_PROMPT =
   "BÓC THÔNG TIN — luật cứng:\n" +
   "- CHỈ lấy thông tin CÓ THẬT trong nội dung. TUYỆT ĐỐI không suy đoán, không bịa, không suy ra từ " +
   "kiến thức bên ngoài. Không có thông tin nào thì điền đúng chuỗi 'N/A'.\n" +
-  "- title: tên vị trí gọn (vd 'Business Analyst', 'Product Owner', 'Senior BA - Banking'). Bắt buộc có; " +
-  "tin không nêu rõ vị trí thì is_job=false.\n" +
+  "- title: tên vị trí gọn. Bắt buộc có; tin không nêu rõ vị trí thì is_job=false. " +
+  "Viết ĐẦY ĐỦ tên vị trí, KHÔNG để viết tắt: 'BA' → 'Business Analyst', 'IT BA'/'ITBA' → " +
+  "'IT Business Analyst', 'PO' → 'Product Owner', 'PM' → 'Project Manager', 'BrSE' → " +
+  "'Bridge System Engineer'. Giữ nguyên phần còn lại của tên vị trí như bài ghi — cấp bậc và " +
+  "lĩnh vực vẫn nằm trong tiêu đề (vd 'Senior BA - Banking' → 'Senior Business Analyst - Banking', " +
+  "'BA/PO' → 'Business Analyst / Product Owner'). KHÔNG thêm cấp bậc hay lĩnh vực mà bài không nói.\n" +
   "- company: tên công ty. Rất nhiều tin không nêu (HR giấu tên khách hàng) — khi đó điền 'N/A', " +
   "KHÔNG lấy tên người đăng làm tên công ty.\n" +
   "- level: Intern | Fresher | Junior | Middle | Senior | Lead | Manager | N/A.\n" +
@@ -132,7 +137,10 @@ export function normalizeExtracted(parsed: Record<string, unknown>): ExtractedJo
   return {
     is_job: isJob,
     reject_reason: asText(parsed.reject_reason, ""),
-    title: asText(parsed.title, ""),
+    // Prompt đã dặn model viết đầy đủ tên vị trí, nhưng nó vẫn chép lại chữ viết
+    // tắt của bài gốc như thường. Chốt lại bằng luật cứng ở đây thì kho luôn
+    // sạch, không phụ thuộc hôm nay model có nghe lời hay không.
+    title: normalizeJobTitle(asText(parsed.title, "")),
     company: asText(parsed.company),
     level: asText(parsed.level),
     location: asText(parsed.location),

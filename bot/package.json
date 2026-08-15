@@ -33,6 +33,7 @@
     "daily-jobs": "tsx src/index.ts daily-jobs",
     "backfill-telegram-jobs": "tsx src/index.ts backfill-telegram-jobs",
     "sync-jobs": "tsx src/index.ts sync-jobs",
+    "backfill-job-titles": "tsx src/index.ts backfill-job-titles",
     "install-cron": "bash scripts/install-cron.sh",
     "setup-vps": "bash scripts/setup-vps.sh",
     "validate-env": "bash scripts/validate-env.sh",
