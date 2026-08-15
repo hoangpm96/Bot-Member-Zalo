@@ -106,6 +106,10 @@ CREATE TABLE IF NOT EXISTS group_messages (
   is_self        INTEGER NOT NULL DEFAULT 0,
   source         TEXT NOT NULL DEFAULT 'listener',
   created_at     INTEGER NOT NULL,
+  -- Tin đã bị thu hồi trên Zalo (hoặc bị bot kiểm duyệt xoá): giữ lại dòng để tra
+  -- cứu nhưng KHÔNG được dùng cho tóm tắt / bản tin / tin tuyển dụng.
+  deleted_at     INTEGER,
+  deleted_source TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
   UNIQUE (thread_id, message_id)
 );
@@ -127,6 +131,9 @@ CREATE TABLE IF NOT EXISTS group_media_events (
   is_self        INTEGER NOT NULL DEFAULT 0,
   source         TEXT NOT NULL DEFAULT 'listener',
   created_at     INTEGER NOT NULL,
+  -- Ảnh/video của tin đã thu hồi — không tính vào thống kê của bản tóm tắt.
+  deleted_at     INTEGER,
+  deleted_source TEXT NOT NULL DEFAULT '',
   FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
   UNIQUE (thread_id, message_id, media_type)
 );

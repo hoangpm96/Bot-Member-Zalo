@@ -329,6 +329,9 @@ export interface GroupMessageRow {
   is_self: number;
   source: string;
   created_at: number;
+  /** Có giá trị = tin đã bị thu hồi trên Zalo (hoặc bot kiểm duyệt xoá) — không dùng để đăng lại. */
+  deleted_at: number | null;
+  deleted_source: string;
 }
 
 export interface MessageFilters {

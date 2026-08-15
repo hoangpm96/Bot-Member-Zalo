@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractText, extractMediaSummary, extractMediaUrl } from "./message-extract.js";
+import {
+  extractText,
+  extractMediaSummary,
+  extractMediaUrl,
+  extractUndoTargetIds,
+} from "./message-extract.js";
 
 /**
  * Test rút text/media từ payload zca-js. Chạy: npm test.
@@ -111,4 +116,32 @@ test("content object rỗng/không nhận diện: null cả hai", () => {
   const payload = msg({ msgType: "chat.sticker", content: { catId: 1 } });
   assert.equal(extractText(payload), null);
   assert.equal(extractMediaSummary(payload), null);
+});
+
+test("undo: lấy id TIN BỊ THU HỒI trong content, không lấy id của thông báo thu hồi", () => {
+  const payload = msg({
+    // Id của chính thông báo thu hồi — KHÔNG được dùng để khớp kho.
+    msgId: "999999999",
+    cliMsgId: "888888888",
+    msgType: "chat.undo",
+    content: { deleteMsg: 1, globalMsgId: 123456789, cliMsgId: 1754900000000, srcId: 1, destId: 2 },
+  });
+  assert.deepEqual(extractUndoTargetIds(payload), ["123456789", "1754900000000"]);
+});
+
+test("undo: bỏ id rỗng/'0', khử trùng lặp, content dạng chuỗi JSON vẫn đọc được", () => {
+  assert.deepEqual(
+    extractUndoTargetIds(msg({ content: { deleteMsg: 1, globalMsgId: 555, cliMsgId: 0 } })),
+    ["555"],
+  );
+  assert.deepEqual(
+    extractUndoTargetIds(msg({ content: { deleteMsg: 1, globalMsgId: 777, cliMsgId: "777" } })),
+    ["777"],
+  );
+  assert.deepEqual(
+    extractUndoTargetIds(msg({ content: JSON.stringify({ deleteMsg: 1, globalMsgId: 42 }) })),
+    ["42"],
+  );
+  assert.deepEqual(extractUndoTargetIds(msg({ content: "thu hồi" })), []);
+  assert.deepEqual(extractUndoTargetIds({}), []);
 });

@@ -10,7 +10,7 @@ import { config } from "../config.js";
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "2026-08-14-job-posts";
+const SCHEMA_VERSION = "2026-08-15-undo-messages";
 
 let db: Database.Database | null = null;
 
@@ -31,7 +31,7 @@ export function getDb(): Database.Database {
   ).run({
     version: SCHEMA_VERSION,
     appliedAt: Date.now(),
-    note: "Kho tin tuyển dụng (job_raw, job_posts) cho bahub.vn/tuyen-dung.",
+    note: "Đánh dấu tin thu hồi (deleted_at) để không lọt vào tóm tắt/bản tin.",
   });
   return db;
 }
@@ -51,6 +51,12 @@ function runColumnMigrations(database: Database.Database): void {
     // Thành phố đã chuẩn hoá từ location, để trang tuyển dụng lọc theo nơi làm
     // việc mà không phải so chuỗi tự do ("Lê Văn Lương, HN" vs "Cầu Giấy, Hà Nội").
     ["job_posts", "city", "TEXT NOT NULL DEFAULT ''"],
+    // Tin bị thu hồi trên Zalo / bị bot kiểm duyệt xoá — giữ dòng nhưng loại khỏi
+    // mọi nội dung đăng ra ngoài (tóm tắt, bản tin, tin tuyển dụng).
+    ["group_messages", "deleted_at", "INTEGER"],
+    ["group_messages", "deleted_source", "TEXT NOT NULL DEFAULT ''"],
+    ["group_media_events", "deleted_at", "INTEGER"],
+    ["group_media_events", "deleted_source", "TEXT NOT NULL DEFAULT ''"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -412,6 +418,40 @@ export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
     });
 }
 
+export type DeletedSource = "undo" | "moderation";
+
+/**
+ * Đánh dấu tin (và ảnh/video kèm theo) là ĐÃ THU HỒI — soft-delete, không xoá dòng.
+ *
+ * Zalo chỉ báo id của tin bị thu hồi, mà id lưu lúc nhận tin có thể là msgId HOẶC
+ * cliMsgId (xem extractMessageId ở listener) → nhận nhiều id ứng viên, khớp cái nào
+ * cũng được. Đã đánh dấu rồi thì giữ nguyên mốc cũ (thu hồi lặp không ghi đè).
+ *
+ * Trả về số dòng vừa đánh dấu ở mỗi bảng — 0/0 nghĩa là tin không có trong kho
+ * (tin ảnh không caption, tin trước khi bot vào nhóm, hoặc id không khớp).
+ */
+export function markGroupContentDeleted(input: {
+  threadId: string;
+  messageIds: string[];
+  source: DeletedSource;
+  now: number;
+}): { messages: number; media: number } {
+  const ids = [...new Set(input.messageIds.map((id) => String(id).trim()).filter((id) => id !== ""))];
+  if (ids.length === 0) return { messages: 0, media: 0 };
+
+  const placeholders = ids.map(() => "?").join(", ");
+  const markOne = (table: "group_messages" | "group_media_events"): number =>
+    getDb()
+      .prepare(
+        `UPDATE ${table}
+         SET deleted_at = ?, deleted_source = ?
+         WHERE thread_id = ? AND message_id IN (${placeholders}) AND deleted_at IS NULL`,
+      )
+      .run(input.now, input.source, input.threadId, ...ids).changes;
+
+  return { messages: markOne("group_messages"), media: markOne("group_media_events") };
+}
+
 // ---- Reads cho tóm tắt hằng ngày ----
 
 export interface GroupMessageRow {
@@ -425,6 +465,8 @@ export interface GroupMessageRow {
  * Tin nhắn text của 1 thread trong [startTs, endTs), sắp theo thời gian tăng dần.
  * Loại tin bot tự gửi (is_self=1) — cảnh báo cleanup/bản tin của bot không phải
  * thảo luận của thành viên, không được lọt vào tóm tắt hay top "sôi nổi nhất".
+ * Loại luôn tin ĐÃ THU HỒI (deleted_at) — người gửi đã rút lại thì không được
+ * đăng tiếp ra tóm tắt / bản tin công khai / kho tin tuyển dụng.
  */
 export function listGroupMessagesBetween(
   threadId: string,
@@ -436,6 +478,7 @@ export function listGroupMessagesBetween(
       `SELECT zalo_user_id, display_name, text, ts
        FROM group_messages
        WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs AND is_self = 0
+         AND deleted_at IS NULL
        ORDER BY ts ASC`,
     )
     .all({ threadId, startTs, endTs }) as GroupMessageRow[];
@@ -453,7 +496,8 @@ export function countGroupMediaBetween(
          COALESCE(SUM(CASE WHEN media_type = 'image' THEN media_count ELSE 0 END), 0) AS images,
          COALESCE(SUM(CASE WHEN media_type = 'video' THEN media_count ELSE 0 END), 0) AS videos
        FROM group_media_events
-       WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs AND is_self = 0`,
+       WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs AND is_self = 0
+         AND deleted_at IS NULL`,
     )
     .get({ threadId, startTs, endTs }) as { images: number; videos: number };
   return { images: Number(row.images), videos: Number(row.videos) };
@@ -566,7 +610,8 @@ export function hasDailySummaryForDate(dayDate: string): boolean {
 export function getEarliestGroupMessageTs(threadId: string): number | null {
   const row = getDb()
     .prepare(
-      `SELECT MIN(ts) AS t FROM group_messages WHERE thread_id = @threadId AND is_self = 0`,
+      `SELECT MIN(ts) AS t FROM group_messages
+       WHERE thread_id = @threadId AND is_self = 0 AND deleted_at IS NULL`,
     )
     .get({ threadId }) as { t: number | null };
   return row.t ?? null;

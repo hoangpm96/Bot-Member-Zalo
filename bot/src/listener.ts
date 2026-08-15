@@ -24,6 +24,7 @@ import {
   recordRemoval,
   saveGroupMessage,
   saveGroupMediaEvent,
+  markGroupContentDeleted,
   recordBotError,
   recordModerationAction,
   setBotState,
@@ -41,7 +42,12 @@ import {
 import { sendTelegramText } from "./telegram.js";
 import { checkBotPermissions } from "./permissions.js";
 import { ensureWarmupStarted, daysCollected, warmupDaysRemaining } from "./warmup.js";
-import { extractText, extractMediaSummary, extractMediaUrl } from "./message-extract.js";
+import {
+  extractText,
+  extractMediaSummary,
+  extractMediaUrl,
+  extractUndoTargetIds,
+} from "./message-extract.js";
 import {
   forwardZaloMessageToTelegram,
   isTelegramForwardConfigured,
@@ -53,6 +59,7 @@ import {
  * Listener chạy LIÊN TỤC (keep-alive trên VPS). Ghi nhận tương tác real-time:
  *  - message   → interaction 'message'
  *  - reaction  → interaction 'reaction'
+ *  - undo      → đánh dấu tin đã thu hồi (không đăng lại ra ngoài)
  *  - group_event join/leave/remove → cập nhật members
  *
  * KHÔNG lấy được tương tác QUÁ KHỨ: getGroupChatHistory trả 404 với Community, còn
@@ -196,6 +203,16 @@ async function moderateMessage(
       });
     }
     deleted = !dryRun;
+    if (deleted) {
+      // Tin đã bị xoá khỏi group thì cũng phải rút khỏi kho nội dung: bản tóm tắt
+      // và bản tin công khai không được phép đăng lại tin vừa bị kiểm duyệt.
+      markGroupContentDeleted({
+        threadId: input.threadId,
+        messageIds: [input.msgId, input.cliMsgId],
+        source: "moderation",
+        now,
+      });
+    }
   } catch (e) {
     error = `xoá tin lỗi: ${String(e)}`;
     console.warn(`[moderation] ${error}`);
@@ -530,6 +547,7 @@ export async function runListener(): Promise<void> {
 
   let messageEvents = 0;
   let reactionEvents = 0;
+  let undoEvents = 0;
   let selfEvents = 0;
   let lastEventAt: number | null = null;
   let lastEventType: "message" | "reaction" | null = null;
@@ -561,6 +579,7 @@ export async function runListener(): Promise<void> {
         lastSocketError,
         messageEvents,
         reactionEvents,
+        undoEvents,
         selfEvents,
         totalEvents: messageEvents + reactionEvents,
         lastEventAt,
@@ -671,6 +690,46 @@ export async function runListener(): Promise<void> {
       record(rc, "reaction");
     } catch (e) {
       console.warn(`[listener] lỗi xử lý reaction: ${String(e)}`);
+    }
+  });
+
+  /**
+   * Thành viên thu hồi tin ("Thu hồi" trong app Zalo) → đánh dấu tin trong kho là
+   * đã xoá để tóm tắt hằng ngày, bản tin công khai và kho tin tuyển dụng KHÔNG
+   * đăng lại nội dung người ta đã rút lại.
+   *
+   * Chỉ ăn được sự kiện lúc bot ĐANG online: thu hồi trong lúc bot chết thì Zalo
+   * không phát lại, tin đó vẫn nằm trong kho — không có cách bù.
+   */
+  api.listener.on("undo", (ev: any) => {
+    try {
+      const threadId = String(ev?.threadId ?? ev?.data?.idTo ?? "");
+      if (!isTargetThread(threadId)) return;
+      undoEvents += 1;
+
+      const ids = extractUndoTargetIds(ev);
+      if (ids.length === 0) {
+        console.warn("[listener] Nhận sự kiện thu hồi nhưng không đọc được id tin bị xoá.");
+        return;
+      }
+
+      const marked = markGroupContentDeleted({
+        threadId,
+        messageIds: ids,
+        source: "undo",
+        now: Date.now(),
+      });
+      if (marked.messages + marked.media === 0) {
+        // Bình thường: tin sticker/file không lưu, hoặc tin có trước khi bot vào nhóm.
+        console.log(`[listener] Tin thu hồi (${ids.join("/")}) không có trong kho — bỏ qua.`);
+        return;
+      }
+      console.log(
+        `[listener] Đã đánh dấu tin thu hồi: ${marked.messages} tin nhắn, ${marked.media} media ` +
+          `(id=${ids.join("/")}).`,
+      );
+    } catch (e) {
+      console.warn(`[listener] lỗi xử lý undo: ${String(e)}`);
     }
   });
 

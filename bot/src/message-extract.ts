@@ -75,6 +75,25 @@ export function extractMediaUrl(payload: any): string | null {
   return null;
 }
 
+/**
+ * Id của tin BỊ THU HỒI trong payload sự kiện `undo` của zca-js.
+ *
+ * Payload undo mang id của CHÍNH thông báo thu hồi ở data.msgId/cliMsgId — không
+ * phải tin bị xoá. Tin bị xoá nằm trong data.content: { globalMsgId, cliMsgId,
+ * deleteMsg, ... }. Lúc nhận tin, listener lưu message_id theo thứ tự ưu tiên
+ * msgId → cliMsgId (msgId chính là globalMsgId ở dạng chuỗi), nên trả về CẢ HAI
+ * ứng viên rồi để tầng DB khớp cái nào có trong kho.
+ */
+export function extractUndoTargetIds(payload: any): string[] {
+  const content = parseObjectMaybe(payload?.data?.content);
+  if (!content) return [];
+  const ids = [content.globalMsgId, content.cliMsgId, content.msgId]
+    .map((v) => (v === null || v === undefined ? "" : String(v).trim()))
+    // "0" là giá trị rỗng của Zalo cho id không có — khớp "0" sẽ đánh dấu nhầm.
+    .filter((v) => v !== "" && v !== "0");
+  return [...new Set(ids)];
+}
+
 export function extractText(payload: any): string | null {
   const content = payload?.data?.content;
   if (typeof content === "string") {

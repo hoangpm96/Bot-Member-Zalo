@@ -150,9 +150,22 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
                 <span className="font-medium text-[var(--color-text)]">{m.display_name || "(không tên)"}</span>
                 <span>{fmtDateTime(m.ts)}</span>
                 {m.is_self ? <Badge tone="warn">self</Badge> : null}
+                {m.deleted_at ? (
+                  <Badge tone="danger">
+                    {m.deleted_source === "moderation" ? "bot đã xoá" : "đã thu hồi"}
+                  </Badge>
+                ) : null}
                 <span className="font-mono">{m.zalo_user_id}</span>
               </div>
-              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--color-text)]">{m.text}</p>
+              <p
+                className={
+                  m.deleted_at
+                    ? "mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--color-muted)] line-through"
+                    : "mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--color-text)]"
+                }
+              >
+                {m.text}
+              </p>
             </Card>
           ))}
         </div>

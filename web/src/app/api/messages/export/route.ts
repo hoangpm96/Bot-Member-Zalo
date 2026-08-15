@@ -32,7 +32,8 @@ export async function GET(request: Request) {
   };
 
   const rows = listGroupMessages(filters).slice().reverse();
-  const header = ["ts", "display_name", "zalo_user_id", "is_self", "text"];
+  // Cột deleted để người mở file biết tin nào đã bị thu hồi, không dùng lại nhầm.
+  const header = ["ts", "display_name", "zalo_user_id", "is_self", "deleted", "text"];
   const lines = [header.join(",")];
   for (const r of rows) {
     lines.push(
@@ -41,6 +42,7 @@ export async function GET(request: Request) {
         csvCell(r.display_name),
         csvCell(r.zalo_user_id),
         r.is_self ? "1" : "0",
+        r.deleted_at ? r.deleted_source || "1" : "",
         csvCell(r.text),
       ].join(","),
     );
