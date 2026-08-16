@@ -77,6 +77,14 @@ function runColumnMigrations(database: Database.Database): void {
     if (columns.some((c) => c.name === column)) continue;
     database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
+
+  // Index trên CỘT VỪA THÊM phải tạo ở đây, KHÔNG được để trong schema.sql.
+  // schema.sql chạy trước bước trên, nên với DB đang chạy (bảng đã có từ trước,
+  // cột thì chưa) câu CREATE INDEX gãy ngay — mà getDb() là cửa vào của mọi
+  // lệnh, gãy ở đây là listener chết theo. Đã xảy ra thật ngày 16/08/2026.
+  database.exec(
+    `CREATE INDEX IF NOT EXISTS idx_job_raw_text_hash ON job_raw(text_hash, posted_at)`,
+  );
 }
 
 // ---- Types ----

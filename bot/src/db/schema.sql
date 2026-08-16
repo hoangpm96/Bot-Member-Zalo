@@ -332,7 +332,9 @@ CREATE TABLE IF NOT EXISTS job_raw (
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_raw_pending ON job_raw(processed_at, posted_at);
-CREATE INDEX IF NOT EXISTS idx_job_raw_text_hash ON job_raw(text_hash, posted_at);
+-- Index cho text_hash KHÔNG nằm ở đây mà ở runColumnMigrations (db/index.ts).
+-- File này chạy TRƯỚC bước thêm cột, nên DB đang chạy (bảng job_raw đã tồn tại,
+-- chưa có cột mới) sẽ gãy ngay ở dòng CREATE INDEX và kéo sập cả listener.
 
 -- Tin tuyển dụng ĐÃ bóc tách, là thứ hiển thị ở bahub.vn/tuyen-dung.
 --
