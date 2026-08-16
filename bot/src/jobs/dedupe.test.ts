@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  contentHash,
   fingerprintOf,
   isSameJob,
   jobFingerprint,
@@ -143,4 +144,37 @@ test("gộp nguồn: mới nhất trước, không nhân đôi cùng một link"
 
   assert.deepEqual(mergeSources([fb], tg), [tg, fb]);
   assert.deepEqual(mergeSources([fb], fb), [fb]);
+});
+
+/**
+ * Cùng một JD copy sang group khác: chữ giống hệt tới từng dấu cách, chỉ khác
+ * emoji hoặc cách viết hoa. Bắt được ở đây thì khỏi tốn một lượt gọi model.
+ */
+test("vân tay nội dung bỏ qua emoji và cách viết hoa", () => {
+  const a = contentHash(
+    "🔥 TUYỂN SENIOR BUSINESS ANALYST — Hà Nội, lương up to 35M gross, yêu cầu 3 năm kinh nghiệm, gửi CV về hr@abc.vn",
+  );
+  const b = contentHash(
+    "Tuyển Senior Business Analyst - Hà Nội, lương up to 35M gross, yêu cầu 3 năm kinh nghiệm, gửi CV về hr@abc.vn ✨",
+  );
+  assert.equal(a, b);
+  assert.notEqual(a, "");
+});
+
+test("hai tin khác nội dung cho vân tay khác nhau", () => {
+  const a = contentHash(
+    "Tuyển Business Analyst mảng ngân hàng tại Hà Nội, lương up to 35 triệu, 3 năm kinh nghiệm, ib em nhé",
+  );
+  const b = contentHash(
+    "Tuyển Product Owner mảng bảo hiểm tại Đà Nẵng, lương up to 45 triệu, 5 năm kinh nghiệm, ib em nhé",
+  );
+  assert.notEqual(a, b);
+});
+
+/**
+ * Tin ngắn KHÔNG được có vân tay: "tuyển BA HN ib em" của hai người khác nhau,
+ * hai vị trí khác nhau vẫn cho ra cùng một chuỗi chuẩn hoá — chặn là mất tin.
+ */
+test("tin quá ngắn không sinh vân tay", () => {
+  assert.equal(contentHash("tuyển BA HN ib em"), "");
 });

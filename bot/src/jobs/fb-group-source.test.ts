@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseFbGroupHtml } from "./fb-group-source.js";
+import { groupSlugFromUrl, parseFbGroupHtml } from "./fb-group-source.js";
 
 /**
  * Fixture rút gọn theo đúng hình dạng JSON mà Facebook nhúng trong HTML trang
@@ -58,13 +58,60 @@ test("bóc đủ trường từ HTML group Facebook", () => {
   assert.match(first!.text, /\n- Mức lương: 20-27M/);
 });
 
-test("bỏ qua bài không có nội dung chữ", () => {
+test("bỏ qua bài không có chữ mà cũng không có ảnh", () => {
+  const empty =
+    `<script>[` +
+    `{"node":{"__typename":"Story","post_id":"111","creation_time":1786688689,` +
+    `"attachments":[{"media":{"__typename":"Video"}}]}}` +
+    `]</script>`;
+  assert.deepEqual(parseFbGroupHtml(empty, "bahubvn"), []);
+});
+
+/**
+ * Bài toàn ảnh là dạng tin tuyển dụng hay gặp nhất ở group việc làm: một tấm
+ * poster JD, không kèm chữ nào. Giữ lại để bước sau đọc chữ trong ảnh.
+ */
+test("giữ bài chỉ có ảnh, kèm link ảnh để đọc chữ", () => {
   const onlyPhoto =
     `<script>[` +
     `{"node":{"__typename":"Story","post_id":"111","creation_time":1786688689,` +
-    `"attachments":[{"media":{"__typename":"Photo"}}]}}` +
+    `"attachments":[{"media":{"__typename":"Photo","photo_image":` +
+    `{"uri":"https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=999","height":540}}}]}}` +
     `]</script>`;
-  assert.deepEqual(parseFbGroupHtml(onlyPhoto, "bahubvn"), []);
+  const items = parseFbGroupHtml(onlyPhoto, "bahubvn");
+  assert.equal(items.length, 1);
+  assert.equal(items[0]!.text, "");
+  assert.deepEqual(items[0]!.imageUrls, [
+    "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=999",
+  ]);
+});
+
+/**
+ * Avatar người đăng nằm cùng khối với ảnh bài và cũng là link lookaside. Lấy
+ * nhầm nó là mỗi bài lại tốn vài giây đọc chữ trên một tấm ảnh chân dung.
+ */
+test("không nhặt avatar người đăng làm ảnh của bài", () => {
+  const withAvatar =
+    `<script>[` +
+    `{"node":{"__typename":"Story","post_id":"222","creation_time":1786688689,` +
+    `"actors":[{"profile_picture":{"uri":"https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=100022"}}],` +
+    `"message":{"text":"Tuyển BA"},` +
+    `"attachments":[{"media":{"__typename":"Photo","photo_image":` +
+    `{"uri":"https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=555"}}}]}}` +
+    `]</script>`;
+  const items = parseFbGroupHtml(withAvatar, "bahubvn");
+  assert.deepEqual(items[0]!.imageUrls, [
+    "https://lookaside.fbsbx.com/lookaside/crawler/media/?media_id=555",
+  ]);
+});
+
+test("bóc được slug group từ link bài", () => {
+  assert.equal(
+    groupSlugFromUrl("https://www.facebook.com/groups/bahubvn/posts/123/"),
+    "bahubvn",
+  );
+  assert.equal(groupSlugFromUrl(null), "");
+  assert.equal(groupSlugFromUrl("https://t.me/xyz/12"), "");
 });
 
 test("bài trùng id chỉ lấy một lần", () => {

@@ -159,11 +159,36 @@ export function normalizeExtracted(parsed: Record<string, unknown>): ExtractedJo
   };
 }
 
+/**
+ * Lời dặn thêm khi nội dung có phần chữ do máy đọc từ ảnh.
+ *
+ * Cần thiết vì luật cứng ở SYSTEM_PROMPT là "chỉ lấy thông tin CÓ THẬT, không
+ * suy đoán" — đúng với chữ người gõ, nhưng áp nguyên vào chữ đọc từ ảnh thì mọi
+ * lỗi nhận dạng đều thành dữ liệu sai được chép y nguyên vào kho. Đo thật trên
+ * một poster JD: tên vị trí và tên công ty là hai chỗ hay vỡ nhất, mà đó lại là
+ * hai trường dựng nên chữ ký chống trùng.
+ *
+ * Ranh giới vẫn giữ: được sửa lỗi ĐỌC, không được thêm dữ kiện không có.
+ */
+const OCR_NOTE =
+  "LƯU Ý QUAN TRỌNG: phần chữ trong <noi_dung> (toàn bộ hoặc đoạn đánh dấu [ảnh]) do máy ĐỌC TỪ ẢNH. " +
+  "Chữ đọc máy hay lỗi: mất dấu câu ('vtsi.vn' thành 'vtsivn'), chữ dính nhau, hình trang trí bị đọc " +
+  "thành chữ cái vô nghĩa, các dòng đảo lộn thứ tự so với bố cục thật của tấm ảnh.\n" +
+  "Vì vậy: đọc HIỂU Ý rồi tự sửa những lỗi đọc rõ ràng khi điền vào các trường; bỏ qua dòng rác. " +
+  "Tên công ty không đọc rõ nhưng có email hay website công ty trong ảnh thì lấy tên công ty từ đó. " +
+  "Ranh giới KHÔNG đổi: chỉ được sửa lỗi ĐỌC, tuyệt đối không thêm thông tin mà ảnh không hề có.\n";
+
 /** Gọi model cho MỘT mẩu nội dung. Lỗi mạng/JSON hỏng thì ném ra để bên gọi ghi nhận. */
-export async function extractJob(input: { text: string; author: string }): Promise<ExtractedJob> {
+export async function extractJob(input: {
+  text: string;
+  author: string;
+  /** Nội dung có phần chữ đọc từ ảnh — model cần được báo trước để hiểu đúng chỗ lem. */
+  fromImage?: boolean;
+}): Promise<ExtractedJob> {
   const content = await callDeepSeekJson(
     SYSTEM_PROMPT,
-    `Người đăng: ${input.author || "không rõ"}\n<noi_dung>\n${input.text}\n</noi_dung>`,
+    `${input.fromImage ? OCR_NOTE : ""}Người đăng: ${input.author || "không rõ"}\n` +
+      `<noi_dung>\n${input.text}\n</noi_dung>`,
     1200,
   );
 

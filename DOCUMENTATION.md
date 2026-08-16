@@ -482,7 +482,7 @@ Cron (`npm run install-cron`, timezone `Asia/Ho_Chi_Minh`):
 | `npm run daily-fb-post`       | Bản tin công khai + ảnh AI → đăng Facebook Page       |
 | `npm run backfill-summaries`  | Bù kho tóm tắt cho ngày quá khứ                       |
 | `npm run backfill-fb-posts`   | Bù kho bản tin công khai cho ngày quá khứ             |
-| `npm run daily-jobs`          | Gom tin tuyển dụng 3 nguồn → AI bóc tách → `job_posts` |
+| `npm run daily-jobs`          | Gom tin tuyển dụng nhiều nguồn (đọc cả chữ trong ảnh) → AI bóc tách → `job_posts` |
 | `npm run job-telegram-poll`   | Hút tin tuyển dụng từ Telegram (chạy mỗi 5 phút)      |
 | `npm run sync-leaderboard`    | Đẩy bảng xếp hạng lên Supabase → bahub.vn/leaderboard |
 | `npm run sync-posts`          | Đẩy kho bản tin lên Supabase → bahub.vn/ban-tin       |

@@ -176,10 +176,19 @@ export const config = {
   // ---- Tin tuyển dụng (daily-jobs → bahub.vn/tuyen-dung) ----
 
   /**
-   * Slug group Facebook CÔNG KHAI để lấy tin tuyển dụng (phần sau
-   * facebook.com/groups/). Rỗng = tắt nguồn Facebook.
+   * Slug các group Facebook CÔNG KHAI để lấy tin tuyển dụng (phần sau
+   * facebook.com/groups/), nhiều group ngăn nhau bằng dấu phẩy. Rỗng = tắt
+   * nguồn Facebook.
+   *
+   * THỨ TỰ KHAI BÁO LÀ THỨ HẠNG ƯU TIÊN, không phải chuyện trang trí: cùng một
+   * JD hay được đăng ở nhiều group, và khi đó link hiển thị trên bahub.vn phải
+   * trỏ về group đứng trước trong danh sách này. Group nhà (bahub.vn) đặt đầu
+   * tiên thì người đọc luôn được dẫn về nhà thay vì sang group của người khác.
    */
-  jobFbGroupSlug: process.env.JOB_FB_GROUP_SLUG?.trim() || "",
+  jobFbGroupSlugs: (process.env.JOB_FB_GROUP_SLUG?.trim() || "")
+    .split(",")
+    .map((slug) => slug.trim().replace(/^.*facebook\.com\/groups\//i, "").replace(/\/.*$/, ""))
+    .filter(Boolean),
 
   /**
    * User-Agent dùng khi tải trang group. Facebook chỉ trả bản server-render đầy
@@ -281,6 +290,52 @@ export const config = {
 
   /** Trần số cụm gửi cho AI mỗi lần chạy — chặn hoá đơn model tăng đột biến. */
   jobMaxItemsPerRun: Math.max(1, readInt("JOB_MAX_ITEMS_PER_RUN", 60)),
+
+  /**
+   * Đọc chữ trong ảnh (OCR) cho tin tuyển dụng và bản tóm tắt.
+   *
+   * Chạy bằng Tesseract ngay trên máy nên không tốn tiền model, nhưng ăn CPU:
+   * mỗi ảnh khoảng 4 giây trên máy để bàn, chậm hơn trên VPS. Tắt được ở đây
+   * cho ngày máy chủ đang bận việc khác.
+   */
+  jobOcrEnabled: readBool("JOB_OCR_ENABLED", true),
+
+  /**
+   * Trần số ảnh được đọc trong MỘT lần chạy.
+   *
+   * Nhóm Zalo có hôm cả trăm ảnh (ảnh chế, ảnh chụp màn hình) — không chặn thì
+   * một lần cron kéo dài hàng giờ chỉ để đọc mấy tấm ảnh vui.
+   */
+  jobOcrMaxImages: Math.max(1, readInt("JOB_OCR_MAX_IMAGES", 25)),
+
+  /**
+   * Bài Facebook có caption dài hơn ngần này ký tự thì KHÔNG đọc ảnh kèm theo.
+   *
+   * Caption đủ dài nghĩa là JD đã nằm trong chữ, ảnh chỉ là tấm banner minh
+   * hoạ — đọc thêm chỉ tốn thời gian và đổ chữ rác vào nội dung gửi model. Đo
+   * trên group việc làm BA: 8/29 bài có caption ngắn hơn ngưỡng này, và đó
+   * đúng là những bài giấu JD trong ảnh.
+   */
+  jobOcrCaptionMinChars: Math.max(0, readInt("JOB_OCR_CAPTION_MIN_CHARS", 200)),
+
+  /**
+   * Thư mục cache bộ dữ liệu Tesseract (~15 MB, tải một lần).
+   *
+   * Để trong SESSION_DIR vì đó là chỗ đã được gắn ổ đĩa bền trên VPS; mất file
+   * chỉ tốn một lần tải lại.
+   */
+  ocrCacheDir: process.env.OCR_CACHE_DIR?.trim() || path.join(sessionDir, "ocr-cache"),
+
+  /**
+   * Thư mục giữ ảnh Zalo tải về chờ đọc chữ.
+   *
+   * Phải tải NGAY lúc nhận tin: URL media Zalo là URL tạm, tới lúc cron tóm tắt
+   * chạy (mỗi ngày một lần) thì nhiều khả năng đã chết. Ảnh đọc xong bị xoá.
+   */
+  zaloMediaDir: process.env.ZALO_MEDIA_DIR?.trim() || path.join(sessionDir, "media"),
+
+  /** Ảnh Zalo chưa kịp đọc quá số ngày này thì dọn đi, tránh đầy đĩa. */
+  zaloMediaKeepDays: Math.max(1, readInt("ZALO_MEDIA_KEEP_DAYS", 3)),
 } as const;
 
 export type AppConfig = typeof config;

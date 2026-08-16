@@ -21,4 +21,12 @@ export interface RawJobItem {
   text: string;
   /** Thời điểm đăng (epoch ms). Cụm nhiều tin lấy mốc tin đầu tiên. */
   postedAt: number;
+  /**
+   * Ảnh đính kèm, để bước xử lý đọc chữ trong ảnh khi phần chữ quá ít.
+   *
+   * Facebook: link ảnh công khai, đọc lúc nào cũng được. Zalo: đường dẫn file
+   * đã tải sẵn về đĩa — link gốc của Zalo là link tạm, không sống nổi tới lúc
+   * cron chạy.
+   */
+  imageUrls?: string[];
 }

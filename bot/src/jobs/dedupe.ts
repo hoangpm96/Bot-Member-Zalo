@@ -14,6 +14,26 @@ import { NA } from "./extract.js";
  * lại người ta hay đổi emoji, đổi cách viết hoa, thêm bớt vài chữ.
  */
 
+/**
+ * Vân tay của NGUYÊN VĂN một bài, để bắt bài copy nguyên si sang group khác.
+ *
+ * Đây là lưới đứng TRƯỚC model, khác hẳn chữ ký `jobFingerprint` phía sau (chữ
+ * ký kia cần model bóc xong công ty/vị trí/lương mới tính được). Cùng một JD
+ * được đăng ở group nhà và group bạn thì phần chữ thường giống hệt tới từng
+ * dấu cách — chặn ở đây thì khỏi tốn một lượt gọi model chỉ để phát hiện điều
+ * mà so chuỗi đã thấy.
+ *
+ * Bài quá ngắn KHÔNG có vân tay: "tuyển BA HN ib em" của hai người khác nhau,
+ * hai vị trí khác nhau vẫn cho ra cùng một chuỗi chuẩn hoá — gộp là mất tin.
+ */
+const CONTENT_HASH_MIN_CHARS = 60;
+
+export function contentHash(text: string): string {
+  const norm = normalizeKey(text);
+  if (norm.length < CONTENT_HASH_MIN_CHARS) return "";
+  return createHash("sha1").update(norm).digest("hex").slice(0, 20);
+}
+
 /** Bỏ dấu tiếng Việt, hạ chữ thường, bỏ mọi thứ không phải chữ/số. */
 export function normalizeKey(value: string): string {
   return value

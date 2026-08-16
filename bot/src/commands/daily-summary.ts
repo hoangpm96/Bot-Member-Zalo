@@ -12,6 +12,8 @@ import {
   setBotState,
 } from "../db/index.js";
 import { login, sendGroupText, sleep } from "../zalo/client.js";
+import { closeOcr } from "../jobs/ocr.js";
+import { imageTextMessages, ocrZaloImages } from "../jobs/zalo-ocr.js";
 import { sendTelegramText } from "../telegram.js";
 import {
   buildTranscript,
@@ -237,12 +239,27 @@ export async function runDailySummary(): Promise<void> {
     // GROUP_ID có thể nằm trong SUMMARY_GROUP_ID → bản tin hôm trước do bot đăng
     // lại thành "tin nhắn của ngày"; loại ra kẻo tự tóm tắt lại chính mình.
     const rawMessages = listGroupMessagesBetween(config.groupId, window.startTs, window.endTs);
-    const messages = rawMessages.filter((m) => !isBotSummaryMessage(m.text));
-    if (messages.length < rawMessages.length) {
+    const textMessages = rawMessages.filter((m) => !isBotSummaryMessage(m.text));
+    if (textMessages.length < rawMessages.length) {
       console.log(
-        `[daily-summary] Loại ${rawMessages.length - messages.length} tin là bản tóm tắt cũ của bot khỏi dữ liệu.`,
+        `[daily-summary] Loại ${rawMessages.length - textMessages.length} tin là bản tóm tắt cũ của bot khỏi dữ liệu.`,
       );
     }
+
+    // Chữ trong ảnh cũng là nội dung của nhóm: có hôm cả cuộc trao đổi xoay
+    // quanh một tấm ảnh chụp màn hình hay một tấm poster, mà bản tóm tắt lại chỉ
+    // thấy "3 ảnh" và không biết trong đó có gì. Đọc ảnh của đúng ngày này rồi
+    // xếp vào đúng mốc thời gian của nó.
+    await ocrZaloImages({
+      threadId: config.groupId,
+      startTs: window.startTs,
+      endTs: window.endTs,
+      now,
+    });
+    const messages = [
+      ...textMessages,
+      ...imageTextMessages(config.groupId, window.startTs, window.endTs),
+    ].sort((a, b) => a.ts - b.ts);
     const media = countGroupMediaBetween(config.groupId, window.startTs, window.endTs);
 
     const top = topSenders(messages);
@@ -337,6 +354,8 @@ export async function runDailySummary(): Promise<void> {
     writeSendState(state);
     await sendParts(state, dests);
   } finally {
+    // Worker Tesseract giữ tiến trình sống nếu không trả về — cron sẽ không thoát.
+    await closeOcr();
     releaseLock(DAILY_SUMMARY_LOCK_KEY);
   }
 }

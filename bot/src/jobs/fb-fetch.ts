@@ -284,6 +284,52 @@ export interface FbFetchResult {
   via: string;
 }
 
+/** Ảnh JD nặng nhất đo được ~0,5 MB; quá 12 MB thì không phải thứ ta cần đọc. */
+const MAX_MEDIA_BYTES = 12 * 1024 * 1024;
+const MEDIA_TIMEOUT_MS = 45_000;
+
+/**
+ * Tải một tệp nhị phân của Facebook (ảnh đính kèm bài).
+ *
+ * Đi ĐÚNG con đường đã đọc được trang group lần gần nhất, rồi mới thử gọi
+ * thẳng. Lý do: nếu IP máy chủ này đã bị Facebook đánh dấu thì ảnh cũng bị từ
+ * chối y như trang group, còn con đường vừa lấy được HTML thì gần như chắc chắn
+ * lấy được ảnh. Ngược lại, ngày nào gọi thẳng đọc được group thì cache là `null`
+ * và ta không tiêu một byte băng thông proxy nào cho ảnh.
+ *
+ * Trả về null thay vì ném: thiếu ảnh của một bài chỉ làm bài đó ít chữ hơn,
+ * không đáng để đổ cả lần chạy.
+ */
+export async function fetchFbBinary(url: string): Promise<Buffer | null> {
+  const cached = readCachedRoute();
+  const routes: Route[] = cached === undefined || cached === null ? [null] : [cached, null];
+
+  for (const route of routes) {
+    const dispatcher: Dispatcher | undefined = route ? new ProxyAgent(route) : undefined;
+    try {
+      const res = await fetch(url, {
+        dispatcher,
+        signal: AbortSignal.timeout(MEDIA_TIMEOUT_MS),
+        headers: headers(),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const type = res.headers.get("content-type") ?? "";
+      if (type && !/^image\//i.test(type)) throw new Error(`content-type ${type}`);
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length === 0) throw new Error("tệp rỗng");
+      if (buffer.length > MAX_MEDIA_BYTES) throw new Error(`${buffer.length} byte, quá nặng`);
+      return buffer;
+    } catch (e) {
+      console.warn(`[daily-jobs] ${describe(route)} không tải được ảnh: ${String(e)}`);
+    } finally {
+      await dispatcher?.close();
+    }
+  }
+  return null;
+}
+
 /**
  * Lấy HTML trang group, đi hết thang đường đi mới chịu thua.
  *

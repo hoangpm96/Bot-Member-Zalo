@@ -21,6 +21,7 @@ import {
   topSenders,
   type DayWindow,
 } from "../summary.js";
+import { imageTextMessages } from "../jobs/zalo-ocr.js";
 import { DAILY_SUMMARY_LOCK_KEY, rescueSummaryStateToArchive } from "./daily-summary.js";
 
 /**
@@ -156,7 +157,13 @@ export async function runBackfillSummaries(): Promise<void> {
       }
 
       const rawMessages = listGroupMessagesBetween(config.groupId, day.startTs, day.endTs);
-      const messages = rawMessages.filter((m) => !isBotSummaryMessage(m.text));
+      // Chữ đã đọc được từ ảnh của ngày đó cũng vào bản bù. KHÔNG đọc ảnh mới ở
+      // đây: ảnh của ngày quá khứ đã bị xoá khỏi đĩa từ lâu, chỉ những ngày mà
+      // luồng hằng ngày từng đọc mới có chữ để dùng lại.
+      const messages = [
+        ...rawMessages.filter((m) => !isBotSummaryMessage(m.text)),
+        ...imageTextMessages(config.groupId, day.startTs, day.endTs),
+      ].sort((a, b) => a.ts - b.ts);
       const media = countGroupMediaBetween(config.groupId, day.startTs, day.endTs);
       if (messages.length === 0 && media.images === 0 && media.videos === 0) {
         skippedEmpty += 1;

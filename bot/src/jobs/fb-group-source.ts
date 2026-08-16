@@ -28,6 +28,18 @@ const RE_POST_ID = /"post_id":"(\d+)"/;
 const RE_CREATION = /"creation_time":(\d{10})/;
 const RE_AUTHOR = /"owning_profile":\{"__typename":"User","name":"((?:[^"\\]|\\.)*)"/;
 const RE_MESSAGE = /"message":\{"text":"((?:[^"\\]|\\.)*)"/;
+/**
+ * Ảnh đính kèm của bài.
+ *
+ * Phải bám đúng khoá `photo_image` chứ không phải mọi link ảnh trong khối:
+ * cùng khối còn có `profile_picture` (avatar người đăng, 40×40). Lấy nhầm avatar
+ * là mỗi bài lại tốn một lượt đọc chữ trên tấm ảnh chân dung.
+ *
+ * Bản Facebook trả cho trình thu thập nằm ở lookaside.fbsbx.com kèm `media_id` —
+ * KHÔNG phải link scontent có chữ ký hết hạn sau vài giờ. Đo ngày 16/08/2026:
+ * tải được bằng UA thường, không cookie, ra đúng ảnh gốc 1536×1024.
+ */
+const RE_PHOTO = /"photo_image":\{"uri":"((?:[^"\\]|\\.)*)"/g;
 
 /** Chuỗi trong HTML là JSON đã escape (ọ, \n...) — trả lại ký tự thật. */
 function decodeJsonString(raw: string): string {
@@ -41,6 +53,16 @@ function decodeJsonString(raw: string): string {
 function firstMatch(chunk: string, re: RegExp): string | null {
   const m = re.exec(chunk);
   return m ? m[1]! : null;
+}
+
+/** Link ảnh của một bài, đã bỏ trùng (Facebook nhắc lại cùng một ảnh vài lần trong khối). */
+function photoUrls(chunk: string): string[] {
+  const urls = new Set<string>();
+  for (const m of chunk.matchAll(RE_PHOTO)) {
+    const url = decodeJsonString(m[1]!);
+    if (/^https:\/\//i.test(url)) urls.add(url);
+  }
+  return [...urls];
 }
 
 /**
@@ -58,12 +80,16 @@ export function parseFbGroupHtml(html: string, groupSlug: string): RawJobItem[] 
   for (const chunk of chunks) {
     const postId = firstMatch(chunk, RE_POST_ID);
     const creation = firstMatch(chunk, RE_CREATION);
-    const message = firstMatch(chunk, RE_MESSAGE);
-    if (!postId || !creation || !message) continue;
+    if (!postId || !creation) continue;
     if (seen.has(postId)) continue;
 
-    const text = decodeJsonString(message).trim();
-    if (!text) continue;
+    const message = firstMatch(chunk, RE_MESSAGE);
+    const text = message ? decodeJsonString(message).trim() : "";
+    const images = photoUrls(chunk);
+    // Bài rỗng chữ mà CÓ ảnh vẫn được giữ: rất nhiều tin tuyển dụng là một tấm
+    // poster quăng lên không kèm lời nào, chữ nằm hết trong ảnh và bước sau sẽ
+    // đọc ra. Rỗng cả chữ lẫn ảnh thì mới thực sự không có gì để xử lý.
+    if (!text && images.length === 0) continue;
 
     seen.add(postId);
     items.push({
@@ -73,23 +99,44 @@ export function parseFbGroupHtml(html: string, groupSlug: string): RawJobItem[] 
       sourceUrl: `https://www.facebook.com/groups/${groupSlug}/posts/${postId}/`,
       text,
       postedAt: Number(creation) * 1000,
+      imageUrls: images,
     });
   }
 
   return items;
 }
 
+/** Slug group nằm trong link bài. Dùng để biết một tin đã lưu đến từ group nào. */
+export function groupSlugFromUrl(url: string | null): string {
+  if (!url) return "";
+  return /facebook\.com\/groups\/([^/]+)/i.exec(url)?.[1] ?? "";
+}
+
 /**
- * Lấy bài mới hơn `sinceTs` từ group Facebook.
+ * Thứ hạng ưu tiên của một group: 0 là cao nhất (group đứng đầu JOB_FB_GROUP_SLUG).
+ *
+ * Group không nằm trong danh sách khai báo đứng sau tất cả — có thể là tin cũ
+ * còn trong kho từ hồi group đó còn được theo dõi.
+ */
+export function fbGroupRank(slug: string): number {
+  const idx = config.jobFbGroupSlugs.indexOf(slug);
+  return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+}
+
+/**
+ * Lấy bài mới hơn `sinceTs` từ MỘT group Facebook.
  *
  * Bài ghim (thường là bài giới thiệu group từ nhiều năm trước) luôn xuất hiện
  * trong mọi lần lấy — lọc theo thời gian đăng là đủ để nó không lọt vào mỗi ngày.
  */
-export async function fetchFbGroupJobs(sinceTs: number): Promise<RawJobItem[]> {
-  if (!config.jobFbGroupSlug) return [];
+export async function fetchFbGroupJobs(
+  groupSlug: string,
+  sinceTs: number,
+): Promise<RawJobItem[]> {
+  if (!groupSlug) return [];
 
-  const { html, via } = await fetchFbGroupHtml(config.jobFbGroupSlug);
-  const all = parseFbGroupHtml(html, config.jobFbGroupSlug);
+  const { html, via } = await fetchFbGroupHtml(groupSlug);
+  const all = parseFbGroupHtml(html, groupSlug);
 
   if (all.length === 0) {
     // fb-fetch đã bảo đảm HTML có node Story, nên tới đây mà không ra bài nào
@@ -97,14 +144,18 @@ export async function fetchFbGroupJobs(sinceTs: number): Promise<RawJobItem[]> {
     // chặn. Ném lỗi để cron ghi bot_errors thay vì lặng lẽ coi như "hôm nay
     // không có tin".
     throw new Error(
-      `Không bóc được bài nào từ group ${config.jobFbGroupSlug} (HTML ${html.length} ký tự, ${via}) — ` +
+      `Không bóc được bài nào từ group ${groupSlug} (HTML ${html.length} ký tự, ${via}) — ` +
         "nhiều khả năng Facebook đổi cấu trúc dữ liệu trong trang.",
     );
   }
 
-  console.log(`[daily-jobs] Group Facebook: ${all.length} bài (${via}).`);
-
-  return all
+  const fresh = all
     .filter((item) => item.postedAt > sinceTs)
     .sort((a, b) => a.postedAt - b.postedAt);
+
+  console.log(
+    `[daily-jobs] Group Facebook ${groupSlug}: ${all.length} bài, ${fresh.length} bài mới (${via}).`,
+  );
+
+  return fresh;
 }

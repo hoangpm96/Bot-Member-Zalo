@@ -57,6 +57,18 @@ function runColumnMigrations(database: Database.Database): void {
     ["group_messages", "deleted_source", "TEXT NOT NULL DEFAULT ''"],
     ["group_media_events", "deleted_at", "INTEGER"],
     ["group_media_events", "deleted_source", "TEXT NOT NULL DEFAULT ''"],
+    // Ảnh đính kèm của một mẩu tin thô (JSON mảng link/đường dẫn file), để bước
+    // xử lý đọc chữ trong ảnh khi bài gần như không có chữ.
+    ["job_raw", "image_urls", "TEXT NOT NULL DEFAULT '[]'"],
+    // Vân tay nội dung, chặn cùng một bài đăng chéo nhiều group trước khi tốn
+    // một lượt gọi model.
+    ["job_raw", "text_hash", "TEXT NOT NULL DEFAULT ''"],
+    ["job_raw", "ocr_text", "TEXT NOT NULL DEFAULT ''"],
+    // Ảnh Zalo: link tạm do Zalo trả về + file đã tải sẵn về đĩa + chữ đọc được.
+    ["group_media_events", "media_url", "TEXT NOT NULL DEFAULT ''"],
+    ["group_media_events", "local_path", "TEXT NOT NULL DEFAULT ''"],
+    ["group_media_events", "ocr_text", "TEXT NOT NULL DEFAULT ''"],
+    ["group_media_events", "ocr_at", "INTEGER"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -182,6 +194,10 @@ export interface GroupMediaEventInput {
   isSelf?: boolean;
   source?: "listener";
   now: number;
+  /** Link media Zalo trả về — link TẠM, giữ lại chỉ để tra cứu khi cần đối chiếu. */
+  mediaUrl?: string;
+  /** File đã tải sẵn về đĩa; đây mới là thứ dùng được lúc đọc chữ trong ảnh. */
+  localPath?: string;
 }
 
 // ---- Members ----
@@ -392,16 +408,21 @@ export function saveGroupMessage(input: GroupMessageInput): void {
     });
 }
 
-/** Lưu metadata ảnh/video. Không lưu URL/file; chỉ đếm loại media theo message. */
+/**
+ * Lưu metadata ảnh/video, kèm link Zalo và file đã tải sẵn (nếu có).
+ *
+ * File tải sẵn là thứ để đọc chữ trong ảnh về sau. Không có file thì dòng này
+ * vẫn có giá trị nguyên như trước: đếm ảnh/video cho bản tóm tắt.
+ */
 export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
   getDb()
     .prepare(
       `INSERT OR IGNORE INTO group_media_events
          (thread_id, message_id, zalo_user_id, display_name, media_type, media_count,
-          msg_type, ts, is_self, source, created_at)
+          msg_type, ts, is_self, source, created_at, media_url, local_path)
        VALUES
          (@threadId, @messageId, @zaloUserId, @displayName, @mediaType, @mediaCount,
-          @msgType, @ts, @isSelf, @source, @now)`,
+          @msgType, @ts, @isSelf, @source, @now, @mediaUrl, @localPath)`,
     )
     .run({
       threadId: input.threadId,
@@ -415,7 +436,111 @@ export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
       isSelf: input.isSelf ? 1 : 0,
       source: input.source ?? "listener",
       now: input.now,
+      mediaUrl: input.mediaUrl ?? "",
+      localPath: input.localPath ?? "",
     });
+}
+
+/**
+ * Ảnh Zalo đã tải về mà chưa đọc chữ, trong một khoảng thời gian.
+ *
+ * Chỉ lấy ảnh (video đọc chữ không có ý nghĩa) và bỏ tin đã thu hồi — người ta
+ * đã rút lại thì chữ trong đó cũng không được vào bản tóm tắt hay trang tuyển
+ * dụng, đúng nếp đang áp cho phần chữ.
+ */
+export function listGroupMediaPendingOcr(
+  threadId: string,
+  startTs: number,
+  endTs: number,
+  limit: number,
+): GroupMediaOcrRow[] {
+  return getDb()
+    .prepare(
+      `SELECT id, zalo_user_id, display_name, ts, local_path
+         FROM group_media_events
+        WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs
+          AND media_type = 'image' AND local_path <> '' AND ocr_at IS NULL
+          AND deleted_at IS NULL
+        ORDER BY ts ASC
+        LIMIT @limit`,
+    )
+    .all({ threadId, startTs, endTs, limit }) as GroupMediaOcrRow[];
+}
+
+export interface GroupMediaOcrRow {
+  id: number;
+  zalo_user_id: string;
+  display_name: string;
+  ts: number;
+  local_path: string;
+}
+
+/**
+ * Ghi lại chữ đọc được từ một ảnh.
+ *
+ * Ghi `ocr_at` cả khi không đọc ra chữ nào: ảnh chế, ảnh chụp mèo thì lần chạy
+ * sau không việc gì phải đọc lại lần nữa.
+ */
+export function saveGroupMediaOcr(id: number, ocrText: string, now: number): void {
+  getDb()
+    .prepare(`UPDATE group_media_events SET ocr_text = @ocrText, ocr_at = @now WHERE id = @id`)
+    .run({ id, ocrText, now });
+}
+
+/** Chữ đã đọc được từ ảnh trong khoảng thời gian — cho bản tóm tắt và tin tuyển dụng dùng lại. */
+export function listGroupMediaOcrBetween(
+  threadId: string,
+  startTs: number,
+  endTs: number,
+): { zalo_user_id: string; display_name: string; ts: number; ocr_text: string }[] {
+  return getDb()
+    .prepare(
+      `SELECT zalo_user_id, display_name, ts, ocr_text
+         FROM group_media_events
+        WHERE thread_id = @threadId AND ts >= @startTs AND ts < @endTs
+          AND ocr_text <> '' AND deleted_at IS NULL AND is_self = 0
+        ORDER BY ts ASC`,
+    )
+    .all({ threadId, startTs, endTs }) as {
+    zalo_user_id: string;
+    display_name: string;
+    ts: number;
+    ocr_text: string;
+  }[];
+}
+
+/** Đường dẫn ảnh đã đọc xong hoặc quá cũ — để dọn đĩa. */
+export function listGroupMediaFilesToClean(olderThanTs: number): { id: number; local_path: string }[] {
+  return getDb()
+    .prepare(
+      `SELECT id, local_path FROM group_media_events
+        WHERE local_path <> '' AND (ocr_at IS NOT NULL OR ts < @olderThanTs)`,
+    )
+    .all({ olderThanTs }) as { id: number; local_path: string }[];
+}
+
+/**
+ * Gắn file ảnh đã tải xong vào dòng media tương ứng.
+ *
+ * Tách khỏi lúc ghi dòng vì việc tải diễn ra SAU: luồng nhận tin real-time
+ * không được đứng chờ mạng, nên dòng được ghi trước rồi đường dẫn điền sau.
+ */
+export function setGroupMediaLocalPath(
+  threadId: string,
+  messageId: string,
+  localPath: string,
+): void {
+  getDb()
+    .prepare(
+      `UPDATE group_media_events SET local_path = @localPath
+        WHERE thread_id = @threadId AND message_id = @messageId AND media_type = 'image'`,
+    )
+    .run({ threadId, messageId, localPath });
+}
+
+/** Quên đường dẫn file đã xoá khỏi đĩa (dòng thống kê và chữ đã đọc vẫn giữ nguyên). */
+export function clearGroupMediaLocalPath(id: number): void {
+  getDb().prepare(`UPDATE group_media_events SET local_path = '' WHERE id = @id`).run({ id });
 }
 
 export type DeletedSource = "undo" | "moderation";
@@ -825,6 +950,9 @@ export interface JobRawRow {
   processed_at: number | null;
   is_job: number | null;
   created_at: number;
+  image_urls: string;
+  ocr_text: string;
+  text_hash: string;
 }
 
 export interface JobRawInput {
@@ -834,6 +962,8 @@ export interface JobRawInput {
   sourceUrl: string | null;
   text: string;
   postedAt: number;
+  imageUrls?: string[];
+  textHash?: string;
 }
 
 /**
@@ -846,17 +976,52 @@ export interface JobRawInput {
 export function saveJobRawBatch(items: JobRawInput[], now: number): number {
   const stmt = getDb().prepare(
     `INSERT OR IGNORE INTO job_raw
-       (source, source_id, author, source_url, text, posted_at, created_at)
-     VALUES (@source, @sourceId, @author, @sourceUrl, @text, @postedAt, @now)`,
+       (source, source_id, author, source_url, text, posted_at, created_at, image_urls, text_hash)
+     VALUES (@source, @sourceId, @author, @sourceUrl, @text, @postedAt, @now, @imageUrls, @textHash)`,
   );
   const run = getDb().transaction((rows: JobRawInput[]) => {
     let inserted = 0;
     for (const row of rows) {
-      inserted += stmt.run({ ...row, now }).changes;
+      inserted += stmt.run({
+        source: row.source,
+        sourceId: row.sourceId,
+        author: row.author,
+        sourceUrl: row.sourceUrl,
+        text: row.text,
+        postedAt: row.postedAt,
+        imageUrls: JSON.stringify(row.imageUrls ?? []),
+        textHash: row.textHash ?? "",
+        now,
+      }).changes;
     }
     return inserted;
   });
   return run(items);
+}
+
+/**
+ * Vân tay nội dung này đã từng vào kho chưa (trong khoảng thời gian còn ý nghĩa).
+ *
+ * Dùng để bỏ bài đăng chéo group TRƯỚC khi gọi model: cùng một JD được copy y
+ * nguyên sang group khác thì chống trùng ở tầng sau vẫn bắt được, nhưng đã tốn
+ * một lượt gọi model để bắt. Chỉ so trong cửa sổ gần đây vì cùng một nhà tuyển
+ * dụng đăng lại đúng nội dung cũ sau vài tháng là một đợt tuyển khác.
+ */
+export function hasJobRawWithTextHash(textHash: string, sinceTs: number): boolean {
+  if (!textHash) return false;
+  const row = getDb()
+    .prepare(
+      `SELECT 1 AS ok FROM job_raw
+        WHERE text_hash = @textHash AND posted_at >= @sinceTs
+        LIMIT 1`,
+    )
+    .get({ textHash, sinceTs }) as { ok: number } | undefined;
+  return row !== undefined;
+}
+
+/** Ghi lại chữ đã đọc từ ảnh của một mẩu thô, để chạy lại không phải đọc lần nữa. */
+export function setJobRawOcrText(id: number, ocrText: string): void {
+  getDb().prepare(`UPDATE job_raw SET ocr_text = @ocrText WHERE id = @id`).run({ id, ocrText });
 }
 
 /** Các mẩu thô chưa qua AI, cũ → mới (tin cũ được xử lý trước để thứ tự đăng đúng). */
@@ -885,6 +1050,24 @@ export function getLatestJobRawPostedAt(source: string): number | null {
   const row = getDb()
     .prepare(`SELECT MAX(posted_at) AS ts FROM job_raw WHERE source = @source`)
     .get({ source }) as { ts: number | null } | undefined;
+  return row?.ts ?? null;
+}
+
+/**
+ * Mốc bài mới nhất đã lấy của MỘT group Facebook.
+ *
+ * Phải tách theo group chứ không dùng chung mốc của cả nguồn `facebook`: thêm
+ * group mới vào danh sách mà đi theo mốc chung thì group mới chỉ lấy được bài
+ * đăng sau thời điểm thêm, mất trắng khoảng mười ngày bài mà Facebook vẫn đang
+ * trả về sẵn trong trang.
+ */
+export function getLatestFbGroupPostedAt(groupSlug: string): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(posted_at) AS ts FROM job_raw
+        WHERE source = 'facebook' AND source_url LIKE @pattern`,
+    )
+    .get({ pattern: `%/groups/${groupSlug}/%` }) as { ts: number | null } | undefined;
   return row?.ts ?? null;
 }
 
@@ -1003,6 +1186,37 @@ export function markJobPostReposted(input: {
               repost_count = repost_count + 1,
               sources_json = @sourcesJson,
               expires_at = @expiresAt,
+              updated_at = @now
+        WHERE fingerprint = @fingerprint`,
+    )
+    .run(input);
+}
+
+/**
+ * Đổi NGUỒN CHÍNH của một tin đã có sang một nơi khác.
+ *
+ * Chỉ dùng cho đúng một việc: cùng một JD xuất hiện ở nhiều group Facebook thì
+ * link hiển thị trên trang phải trỏ về group đứng trước trong JOB_FB_GROUP_SLUG.
+ * Nếu không có hàm này, link chính là nơi ĐẾN TRƯỚC — mà thứ tự đến chỉ phụ
+ * thuộc hôm đó ai đăng sớm hơn, tức là group nhà thua chỉ vì đăng chậm nửa ngày.
+ *
+ * KHÔNG đụng vào nội dung hiển thị (mô tả, tiêu đề, lương): bản bóc tách đầu
+ * tiên thường đầy đủ hơn, và đổi nội dung theo mỗi lần đăng lại là cách chắc
+ * chắn nhất để một tin đang đúng bỗng thành sai.
+ */
+export function updateJobPostPrimarySource(input: {
+  fingerprint: string;
+  source: string;
+  sourceId: string;
+  sourceUrl: string | null;
+  now: number;
+}): void {
+  getDb()
+    .prepare(
+      `UPDATE job_posts
+          SET source = @source,
+              source_id = @sourceId,
+              source_url = @sourceUrl,
               updated_at = @now
         WHERE fingerprint = @fingerprint`,
     )

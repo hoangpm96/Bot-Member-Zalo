@@ -134,6 +134,14 @@ CREATE TABLE IF NOT EXISTS group_media_events (
   -- Ảnh/video của tin đã thu hồi — không tính vào thống kê của bản tóm tắt.
   deleted_at     INTEGER,
   deleted_source TEXT NOT NULL DEFAULT '',
+  -- Link media do Zalo trả về. Link TẠM: chỉ sống được một lúc sau khi tin gửi,
+  -- nên listener tải luôn file về local_path chứ không trông vào link này về sau.
+  media_url      TEXT NOT NULL DEFAULT '',
+  local_path     TEXT NOT NULL DEFAULT '',
+  -- Chữ đọc được trong ảnh; ocr_at là mốc đã đọc (kể cả khi không ra chữ nào,
+  -- để không đọc đi đọc lại một tấm ảnh không có chữ).
+  ocr_text       TEXT NOT NULL DEFAULT '',
+  ocr_at         INTEGER,
   FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
   UNIQUE (thread_id, message_id, media_type)
 );
@@ -312,10 +320,19 @@ CREATE TABLE IF NOT EXISTS job_raw (
   processed_at INTEGER,
   is_job       INTEGER,
   created_at   INTEGER NOT NULL,
+  -- Ảnh đính kèm (JSON mảng): link công khai với Facebook, đường dẫn file đã tải
+  -- sẵn với Zalo. Bài gần như không có chữ thì bước xử lý đọc chữ từ những ảnh này.
+  image_urls   TEXT NOT NULL DEFAULT '[]',
+  -- Chữ đọc được từ ảnh, ghi lại để chạy lại không phải đọc lần nữa.
+  ocr_text     TEXT NOT NULL DEFAULT '',
+  -- Vân tay nội dung đã chuẩn hoá. Cùng một JD đăng ở nhiều group cho ra cùng
+  -- một vân tay, nhờ vậy chặn được trước khi tốn một lượt gọi model.
+  text_hash    TEXT NOT NULL DEFAULT '',
   UNIQUE (source, source_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_job_raw_pending ON job_raw(processed_at, posted_at);
+CREATE INDEX IF NOT EXISTS idx_job_raw_text_hash ON job_raw(text_hash, posted_at);
 
 -- Tin tuyển dụng ĐÃ bóc tách, là thứ hiển thị ở bahub.vn/tuyen-dung.
 --

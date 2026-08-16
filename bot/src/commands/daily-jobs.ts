@@ -10,6 +10,8 @@ import {
   markJobRawProcessed,
   recordBotError,
   releaseLock,
+  setJobRawOcrText,
+  updateJobPostPrimarySource,
   type JobPostRow,
   type JobRawRow,
 } from "../db/index.js";
@@ -25,6 +27,11 @@ import {
   type JobKeys,
 } from "../jobs/dedupe.js";
 import { extractJob, type ExtractedJob } from "../jobs/extract.js";
+import { fbGroupRank, groupSlugFromUrl } from "../jobs/fb-group-source.js";
+import { fetchFbBinary } from "../jobs/fb-fetch.js";
+import { closeOcr, ocrImage } from "../jobs/ocr.js";
+import { looksLikeJobPost } from "../jobs/prefilter.js";
+import { cleanupOldMedia } from "../zalo-media.js";
 
 /**
  * Cron hằng ngày: gom tin từ group Facebook công khai + topic Telegram + group
@@ -54,7 +61,7 @@ export interface DailyJobsReport {
 
 function anySourceConfigured(): boolean {
   return Boolean(
-    config.jobFbGroupSlug ||
+    config.jobFbGroupSlugs.length > 0 ||
       config.jobTelegramGroupSlug ||
       (config.jobZaloEnabled && config.groupId),
   );
@@ -115,12 +122,104 @@ function findNearDuplicate(keys: JobKeys, now: number): JobPostRow | undefined {
   );
 }
 
+/** Tối đa số ảnh đọc cho MỘT bài: JD dài được tách thành vài trang ảnh, quá số này là album quảng cáo. */
+const MAX_IMAGES_PER_POST = 3;
+
+/**
+ * Nội dung đưa cho model, đã bổ sung chữ đọc được trong ảnh khi cần.
+ *
+ * Chỉ đọc ảnh khi phần chữ QUÁ ÍT. Bài đã có JD đầy đủ bằng chữ thì tấm ảnh kèm
+ * theo chỉ là banner: đọc nó vừa tốn vài giây CPU vừa đổ thêm chữ rác vào nội
+ * dung gửi model.
+ *
+ * Chữ đọc được ghi lại vào job_raw: lần chạy sau (chạy tay lại, hoặc lần trước
+ * gãy giữa chừng) dùng lại luôn, không đọc lần nữa.
+ */
+async function textWithImages(
+  raw: JobRawRow,
+  budget: { left: number },
+): Promise<{ text: string; fromImage: boolean }> {
+  if (raw.ocr_text) return { text: `${raw.text}\n[ảnh]\n${raw.ocr_text}`.trim(), fromImage: true };
+  if (!config.jobOcrEnabled) return { text: raw.text, fromImage: false };
+  if (raw.text.length >= config.jobOcrCaptionMinChars) {
+    return { text: raw.text, fromImage: false };
+  }
+  // Nguồn Zalo mang sẵn chữ từ ảnh trong chính phần text (xem jobs/zalo-ocr.ts).
+  if (raw.source !== "facebook" || budget.left <= 0) {
+    return { text: raw.text, fromImage: raw.text.includes("[ảnh]") };
+  }
+
+  let urls: string[] = [];
+  try {
+    const parsed = JSON.parse(raw.image_urls || "[]") as unknown;
+    urls = Array.isArray(parsed) ? parsed.filter((u): u is string => typeof u === "string") : [];
+  } catch {
+    urls = [];
+  }
+  if (urls.length === 0) return { text: raw.text, fromImage: false };
+
+  const chunks: string[] = [];
+  for (const url of urls.slice(0, MAX_IMAGES_PER_POST)) {
+    if (budget.left <= 0) break;
+    budget.left -= 1;
+    const buffer = await fetchFbBinary(url);
+    if (!buffer) continue;
+    const text = await ocrImage(buffer);
+    if (text) chunks.push(text);
+  }
+
+  const ocrText = chunks.join("\n");
+  // Ghi cả khi rỗng thì không được: chuỗi rỗng nghĩa là "chưa đọc", còn ảnh
+  // không có chữ thì lần chạy sau đọc lại cũng chỉ ra chuỗi rỗng — chấp nhận,
+  // đổi lại không phải thêm một cột trạng thái nữa.
+  if (ocrText) setJobRawOcrText(raw.id, ocrText);
+
+  return {
+    text: ocrText ? `${raw.text}\n[ảnh]\n${ocrText}`.trim() : raw.text,
+    fromImage: ocrText !== "",
+  };
+}
+
+/**
+ * Nguồn mới có xứng làm LINK CHÍNH thay cho nguồn đang hiển thị không.
+ *
+ * Chỉ xét giữa các group Facebook, theo thứ hạng khai trong JOB_FB_GROUP_SLUG:
+ * group đứng trước thắng. Đây là chỗ thực thi yêu cầu "cùng một tin thì ưu tiên
+ * link về group nhà" — nếu không có bước này, link chính là nơi ĐẾN TRƯỚC, mà
+ * thứ tự đến chỉ phụ thuộc hôm đó ai đăng sớm hơn.
+ *
+ * Nguồn khác (Zalo, Telegram) không tham gia: tin Zalo không có link công khai
+ * để trỏ tới, còn đổi qua đổi lại giữa các loại nguồn thì link trên trang sẽ
+ * nhảy loạn theo từng ngày.
+ */
+export function shouldPromoteSource(
+  existing: { source: string; source_url: string | null },
+  incoming: { source: string; sourceUrl: string | null },
+): boolean {
+  if (existing.source !== "facebook" || incoming.source !== "facebook") return false;
+  const from = groupSlugFromUrl(incoming.sourceUrl);
+  const to = groupSlugFromUrl(existing.source_url);
+  if (!from || !to || from === to) return false;
+  return fbGroupRank(from) < fbGroupRank(to);
+}
+
 /** Đưa một mẩu thô qua AI rồi ghi vào kho. Trả về việc đã làm với nó. */
 async function processRaw(
   raw: JobRawRow,
   now: number,
+  ocrBudget: { left: number },
 ): Promise<"created" | "reposted" | "rejected" | "suspect"> {
-  const job = await extractJob({ text: raw.text, author: raw.author });
+  const { text, fromImage } = await textWithImages(raw, ocrBudget);
+
+  // Bài rỗng chữ được giữ lại từ đầu vì có ảnh; đọc xong mà vẫn không ra chữ
+  // nào, hoặc chữ đọc được rõ ràng không phải tin tuyển dụng (ảnh chế, ảnh chụp
+  // màn hình), thì dừng ở đây thay vì tốn một lượt gọi model.
+  if (!text.trim() || (fromImage && !looksLikeJobPost(text))) {
+    markJobRawProcessed(raw.id, false, now);
+    return "rejected";
+  }
+
+  const job = await extractJob({ text, author: raw.author, fromImage });
 
   if (!job.is_job) {
     markJobRawProcessed(raw.id, false, now);
@@ -155,6 +254,20 @@ async function processRaw(
       expiresAt: Math.max(existing.expires_at, expiresAt),
       now,
     });
+    // Cùng một tin ở nhiều group: link trên trang phải trỏ về group đứng trước
+    // trong JOB_FB_GROUP_SLUG, bất kể group nào đăng trước.
+    if (shouldPromoteSource(existing, { source: raw.source, sourceUrl: raw.source_url })) {
+      updateJobPostPrimarySource({
+        fingerprint: existing.fingerprint,
+        source: raw.source,
+        sourceId: raw.source_id,
+        sourceUrl: raw.source_url,
+        now,
+      });
+      console.log(
+        `[daily-jobs] "${existing.title}": chuyển link chính sang ${groupSlugFromUrl(raw.source_url)}.`,
+      );
+    }
     markJobRawProcessed(raw.id, true, now);
     return "reposted";
   }
@@ -233,9 +346,13 @@ export async function runDailyJobs(): Promise<DailyJobsReport | null> {
       errors: [...collected.errors],
     };
 
+    // Trần đọc ảnh dùng CHUNG cho cả lần chạy: một bài album 10 ảnh không được
+    // phép ngốn hết phần của những bài phía sau.
+    const ocrBudget = { left: config.jobOcrMaxImages };
+
     for (const raw of pending) {
       try {
-        const outcome = await processRaw(raw, Date.now());
+        const outcome = await processRaw(raw, Date.now(), ocrBudget);
         report[outcome] += 1;
         report.processed += 1;
       } catch (e) {
@@ -266,6 +383,9 @@ export async function runDailyJobs(): Promise<DailyJobsReport | null> {
     if (!config.dryRun) await notifyIfNeeded(report);
     return report;
   } finally {
+    // Worker Tesseract giữ tiến trình sống nếu không trả về; cron sẽ treo mãi.
+    await closeOcr();
+    cleanupOldMedia(Date.now());
     releaseLock(LOCK_KEY);
   }
 }

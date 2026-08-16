@@ -24,6 +24,7 @@ import {
   recordRemoval,
   saveGroupMessage,
   saveGroupMediaEvent,
+  setGroupMediaLocalPath,
   markGroupContentDeleted,
   recordBotError,
   recordModerationAction,
@@ -32,6 +33,7 @@ import {
   releaseLock,
 } from "./db/index.js";
 import { syncGroupMembers } from "./member-sync.js";
+import { saveZaloImage } from "./zalo-media.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
 import {
   compileBlacklist,
@@ -643,11 +645,13 @@ export async function runListener(): Promise<void> {
           }).catch((e) => console.warn(`[moderation] lỗi không bắt được: ${String(e)}`));
         }
       }
+      const mediaUrl = media ? extractMediaUrl(payload) : null;
       if (media) {
+        const mediaMessageId = extractMessageId(payload, sender, ts, `${media.type}:${media.count}`);
         upsertMember({ zaloUserId: sender, displayName, now: Date.now() });
         saveGroupMediaEvent({
           threadId,
-          messageId: extractMessageId(payload, sender, ts, `${media.type}:${media.count}`),
+          messageId: mediaMessageId,
           zaloUserId: sender,
           displayName,
           mediaType: media.type,
@@ -656,7 +660,18 @@ export async function runListener(): Promise<void> {
           ts,
           isSelf: Boolean(payload?.isSelf),
           now: Date.now(),
+          mediaUrl: mediaUrl ?? "",
         });
+        // Ảnh phải tải NGAY: link Zalo là link tạm, tới lúc cron tóm tắt/tuyển
+        // dụng chạy thì đã chết. Không chờ ở đây — vòng nhận sự kiện phải rảnh
+        // tay cho tin tiếp theo; tải xong mới điền đường dẫn vào dòng vừa ghi.
+        if (media.type === "image" && mediaUrl) {
+          void saveZaloImage({ url: mediaUrl, threadId, messageId: mediaMessageId })
+            .then((file) => {
+              if (file) setGroupMediaLocalPath(threadId, mediaMessageId, file);
+            })
+            .catch((e) => console.warn(`[listener] lưu ảnh hỏng: ${String(e)}`));
+        }
       }
       if (isTelegramForwardConfigured()) {
         enqueueTelegramForward({
@@ -664,7 +679,7 @@ export async function runListener(): Promise<void> {
           displayName,
           text,
           msgType: String(payload?.data?.msgType ?? ""),
-          media: media ? { ...media, url: extractMediaUrl(payload) } : null,
+          media: media ? { ...media, url: mediaUrl } : null,
           ts,
           threadId,
           // Cùng cách sinh id với bản ghi trong kho → thu hồi tra ngược được.
